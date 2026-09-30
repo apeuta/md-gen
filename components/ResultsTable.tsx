@@ -18,10 +18,13 @@ import { useMemo } from "react";
 
 import { useConfig, useSession } from "../context/ConfigContext";
 import { ALL_STAFF_LEVELS, calculate } from "../lib/calc";
-import { buildCsv } from "../lib/csv";
-import { downloadText } from "../lib/persistence";
 import { staffLevelLabel } from "../lib/types";
-import type { EstimationResult, StaffLevel, TaskResult } from "../lib/types";
+import type {
+  EstimationResult,
+  RateTable,
+  StaffLevel,
+  TaskResult,
+} from "../lib/types";
 
 // ============================================================================
 // Helper format
@@ -32,6 +35,18 @@ function formatMandays(value: number): string {
   // Bulatkan ringan untuk menghindari galat floating point (mis. 0.30000000000000004).
   const rounded = Math.round(value * 1000) / 1000;
   return String(rounded);
+}
+
+// Formatter biaya dengan pemisah ribuan (locale Indonesia), maks 2 desimal.
+// Selaras dengan tampilan biaya di RatePanel.
+const AMOUNT_FORMAT = new Intl.NumberFormat("id-ID", {
+  maximumFractionDigits: 2,
+});
+
+// Format nilai biaya menjadi string berpemisah ribuan.
+function formatAmount(value: number): string {
+  const rounded = Math.round(value * 100) / 100;
+  return AMOUNT_FORMAT.format(rounded);
 }
 
 // Menyaring level yang benar-benar terpakai (nilai > 0) dari sebuah record level.
@@ -45,16 +60,24 @@ function usedLevels(totalPerLevel: Record<StaffLevel, number>): StaffLevel[] {
 // ============================================================================
 
 export function ResultsTable() {
-  // Config menyediakan definisi kategori/task/pertanyaan/rate.
+  // Config menyediakan definisi kategori/task/pertanyaan/rate default.
   const { config } = useConfig();
-  // Session menyediakan task terpilih dan jawaban kuisioner (Req 1.3, 2.5).
-  const { selectedTaskIds, answers } = useSession();
+  // Session menyediakan task terpilih, jawaban, dan override rate sesi (Req 1.3, 2.5).
+  const { selectedTaskIds, answers, rateOverrides } = useSession();
 
   // Hitung ulang hasil secara reaktif setiap input berubah (Req 2.5).
+  // rateOverrides diteruskan agar biaya konsisten dengan tampilan RatePanel.
   const result: EstimationResult = useMemo(
-    () => calculate({ config, selectedTaskIds, answers }),
-    [config, selectedTaskIds, answers],
+    () => calculate({ config, selectedTaskIds, answers, rateOverrides }),
+    [config, selectedTaskIds, answers, rateOverrides],
   );
+
+  // Fungsi rate efektif per level: override sesi bila ada, selain itu default config, selain itu 0.
+  const effectiveRate = useMemo(() => {
+    const rates: RateTable = config.rates;
+    return (level: StaffLevel): number =>
+      rateOverrides[level] ?? rates[level] ?? 0;
+  }, [config.rates, rateOverrides]);
 
   // Peta id kategori -> nama, untuk judul grup.
   const categoryNameById = useMemo(() => {
@@ -94,38 +117,18 @@ export function ResultsTable() {
   // Empty state: tidak ada task terpilih (Req 5.5). Tetap tampilkan ringkasan nol.
   const isEmpty = result.perTask.length === 0;
 
-  // Export CSV: bangun string CSV dari hasil estimasi + config, lalu unduh sebagai .csv.
-  // Tombol dinonaktifkan bila belum ada task terpilih (result.perTask kosong).
-  function handleExportCsv() {
-    const csv = buildCsv(result, config);
-    downloadText(csv, "estimasi-mandays.csv", "text/csv;charset=utf-8");
-  }
+  // Catatan: tombol Export CSV kini tunggal, berada di bar navigasi langkah Hasil
+  // (lihat AppShell -> ExportCsvButton), sehingga tidak lagi diletakkan di header ini.
 
   return (
     <section className="mx-auto w-full max-w-4xl">
-      <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-bold text-ink">Hasil Estimasi</h2>
-          <p className="mt-1 text-sm text-ink/70">
-            Ringkasan mandays per task, per kategori, dan total per level. Dihitung
-            ulang otomatis setiap pilihan task atau jawaban berubah.
-          </p>
-        </div>
-        {/* Export CSV hasil estimasi. Dinonaktifkan bila belum ada task terpilih. */}
-        <button
-          type="button"
-          onClick={handleExportCsv}
-          disabled={isEmpty}
-          aria-disabled={isEmpty}
-          title={
-            isEmpty
-              ? "Pilih minimal satu task terlebih dahulu untuk mengekspor CSV."
-              : "Unduh hasil estimasi sebagai berkas CSV."
-          }
-          className="rounded-md border border-ink/30 bg-ink px-4 py-2 text-sm font-medium text-cream transition hover:bg-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/40 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Export CSV
-        </button>
+      <header className="mb-4">
+        <h2 className="text-xl font-bold text-ink">Hasil Estimasi</h2>
+        <p className="mt-1 text-sm text-ink/70">
+          Ringkasan mandays per task, per kategori, dan total per level. Kolom biaya
+          per role memakai rate efektif (override sesi bila ada, selain itu rate
+          default konfigurasi). Dihitung ulang otomatis setiap pilihan berubah.
+        </p>
       </header>
 
       {isEmpty ? (
@@ -143,6 +146,7 @@ export function ResultsTable() {
               categoryName={group.categoryName}
               tasks={group.tasks}
               subtotal={result.perCategoryPerLevel[group.categoryId]}
+              effectiveRate={effectiveRate}
             />
           ))}
 
@@ -163,9 +167,16 @@ interface CategoryTableProps {
   tasks: TaskResult[];
   // Subtotal per level untuk kategori ini (dari perCategoryPerLevel).
   subtotal: Record<StaffLevel, number> | undefined;
+  // Fungsi rate efektif per level (override sesi ?? default config ?? 0).
+  effectiveRate: (level: StaffLevel) => number;
 }
 
-function CategoryTable({ categoryName, tasks, subtotal }: CategoryTableProps) {
+function CategoryTable({
+  categoryName,
+  tasks,
+  subtotal,
+  effectiveRate,
+}: CategoryTableProps) {
   // Subtotal mandays seluruh task pada kategori ini (menjumlahkan semua role).
   const categoryTotal = tasks.reduce((sum, task) => sum + task.totalMandays, 0);
 
@@ -189,13 +200,16 @@ function CategoryTable({ categoryName, tasks, subtotal }: CategoryTableProps) {
             <th scope="col" className="px-4 py-2 font-medium">
               Level
             </th>
+            <th scope="col" className="px-4 py-2 text-right font-medium">
+              Biaya
+            </th>
           </tr>
         </thead>
         <tbody>
           {/* Setiap task ditampilkan sebagai baris judul, lalu satu sub-baris per role
-              berisi (level, mandays, penanda out-of-range per role) (Req 5.1, 3.5). */}
+              berisi (level, mandays, biaya, penanda out-of-range per role) (Req 5.1, 3.5). */}
           {tasks.map((task) => (
-            <TaskRows key={task.taskId} task={task} />
+            <TaskRows key={task.taskId} task={task} effectiveRate={effectiveRate} />
           ))}
         </tbody>
         <tfoot>
@@ -218,6 +232,8 @@ function CategoryTable({ categoryName, tasks, subtotal }: CategoryTableProps) {
                     .join(" · ")
                 : "—"}
             </td>
+            {/* Kolom biaya pada subtotal dikosongkan; biaya ditampilkan per role. */}
+            <td className="px-4 py-2" aria-hidden="true" />
           </tr>
         </tfoot>
       </table>
@@ -229,7 +245,26 @@ function CategoryTable({ categoryName, tasks, subtotal }: CategoryTableProps) {
 // Sub-komponen: baris satu task (judul task + sub-baris per role)
 // ============================================================================
 
-function TaskRows({ task }: { task: TaskResult }) {
+// Menghitung tampilan biaya sebuah role: mandays × rate efektif level role.
+// Bila rate efektif 0, tampilkan "—" agar tabel tidak ramai (sesuai permintaan).
+function roleCostDisplay(
+  role: { level: StaffLevel; mandays: number },
+  effectiveRate: (level: StaffLevel) => number,
+): string {
+  const rate = effectiveRate(role.level);
+  if (rate <= 0) {
+    return "—";
+  }
+  return formatAmount(role.mandays * rate);
+}
+
+function TaskRows({
+  task,
+  effectiveRate,
+}: {
+  task: TaskResult;
+  effectiveRate: (level: StaffLevel) => number;
+}) {
   // Task dengan satu role: tampilkan judul + rincian pada baris yang sama untuk ringkas.
   // Task dengan >1 role: tampilkan judul task, lalu satu baris untuk tiap role.
   const isSingleRole = task.roles.length === 1;
@@ -246,6 +281,9 @@ function TaskRows({ task }: { task: TaskResult }) {
           {formatMandays(role.mandays)}
         </td>
         <td className="px-4 py-2 text-ink">{staffLevelLabel(role.level)}</td>
+        <td className="px-4 py-2 text-right tabular-nums text-ink">
+          {roleCostDisplay(role, effectiveRate)}
+        </td>
       </tr>
     );
   }
@@ -263,6 +301,8 @@ function TaskRows({ task }: { task: TaskResult }) {
         <td className="px-4 py-2 text-xs text-ink/60">
           {task.roles.length} role
         </td>
+        {/* Biaya ditampilkan per role pada sub-baris di bawah. */}
+        <td className="px-4 py-2" aria-hidden="true" />
       </tr>
       {/* Sub-baris per role. */}
       {task.roles.map((role, idx) => (
@@ -278,6 +318,9 @@ function TaskRows({ task }: { task: TaskResult }) {
             {formatMandays(role.mandays)}
           </td>
           <td className="px-4 py-1.5 text-ink/80">{staffLevelLabel(role.level)}</td>
+          <td className="px-4 py-1.5 text-right tabular-nums text-ink/80">
+            {roleCostDisplay(role, effectiveRate)}
+          </td>
         </tr>
       ))}
     </>

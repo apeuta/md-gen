@@ -47,33 +47,49 @@ function formatAmount(value: number): string {
 // ============================================================================
 
 export function RatePanel() {
-  // Config menyediakan rate tersimpan + fungsi setRate untuk mengubahnya.
-  const { config, setRate } = useConfig();
-  // Session menyediakan task terpilih dan jawaban kuisioner (Req 1.3, 2.5).
-  const { selectedTaskIds, answers } = useSession();
+  // Config menyediakan rate DEFAULT (persisted) yang diatur di tab Konfigurasi.
+  const { config } = useConfig();
+  // Session menyediakan task terpilih, jawaban, dan OVERRIDE rate sesi (ephemeral).
+  const {
+    selectedTaskIds,
+    answers,
+    rateOverrides,
+    setRateOverride,
+    clearRateOverrides,
+  } = useSession();
 
   // Hitung ulang hasil (termasuk totalPerLevel, costPerLevel, grandTotalCost)
   // secara reaktif setiap input berubah (Req 2.5, 6.2, 6.4).
+  // rateOverrides sesi diteruskan agar biaya memakai rate efektif.
   const result: EstimationResult = useMemo(
-    () => calculate({ config, selectedTaskIds, answers }),
-    [config, selectedTaskIds, answers],
+    () => calculate({ config, selectedTaskIds, answers, rateOverrides }),
+    [config, selectedTaskIds, answers, rateOverrides],
   );
 
-  // Apakah minimal satu rate telah diisi? Menentukan tampil/tidaknya grand total biaya (Req 6.4).
+  // Rate efektif per level: override sesi bila ada, selain itu default config, selain itu 0.
+  function effectiveRate(level: StaffLevel): number {
+    return rateOverrides[level] ?? config.rates[level] ?? 0;
+  }
+
+  // Apakah minimal satu rate EFEKTIF terisi? Menentukan tampil/tidaknya grand total biaya (Req 6.4).
   const hasAnyRate = useMemo(
-    () =>
-      ALL_STAFF_LEVELS.some((level) => {
-        const rate = config.rates[level];
-        return rate !== undefined && rate > 0;
-      }),
-    [config.rates],
+    () => ALL_STAFF_LEVELS.some((level) => effectiveRate(level) > 0),
+    // effectiveRate bergantung pada config.rates & rateOverrides.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [config.rates, rateOverrides],
   );
 
-  // Handler perubahan input rate satu level.
-  // String kosong -> undefined (hapus rate, diperlakukan nol). Angka valid & non-negatif -> simpan (Req 6.3).
+  // Apakah ada override sesi aktif? Menentukan aktif/tidaknya tombol reset.
+  const hasOverrides = useMemo(
+    () => ALL_STAFF_LEVELS.some((level) => rateOverrides[level] !== undefined),
+    [rateOverrides],
+  );
+
+  // Handler perubahan input rate satu level -> mengedit OVERRIDE sesi (bukan default).
+  // String kosong -> hapus override (kembali ke default). Angka valid & non-negatif -> simpan.
   function handleRateChange(level: StaffLevel, raw: string) {
     if (raw.trim() === "") {
-      setRate(level, undefined);
+      setRateOverride(level, undefined);
       return;
     }
     const parsed = Number(raw);
@@ -81,18 +97,35 @@ export function RatePanel() {
     if (Number.isNaN(parsed) || parsed < 0) {
       return;
     }
-    setRate(level, parsed);
+    setRateOverride(level, parsed);
   }
 
   return (
     <section className="mx-auto w-full max-w-4xl">
-      <header className="mb-4">
-        <h2 className="text-xl font-bold text-ink">Rate &amp; Estimasi Biaya</h2>
-        <p className="mt-1 text-sm text-ink/70">
-          Masukkan rate per level (opsional). Biaya dihitung sebagai total mandays
-          level dikalikan rate. Level tanpa rate dianggap bernilai nol dan tidak
-          menghambat perhitungan mandays.
-        </p>
+      <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold text-ink">Rate &amp; Estimasi Biaya</h2>
+          <p className="mt-1 text-sm text-ink/70">
+            Rate awal berasal dari default konfigurasi. Perubahan di sini bersifat
+            sementara untuk estimasi ini saja dan TIDAK mengubah rate default.
+            Biaya dihitung sebagai total mandays level dikalikan rate efektif.
+          </p>
+        </div>
+        {/* Reset seluruh override sesi kembali ke rate default konfigurasi. */}
+        <button
+          type="button"
+          onClick={clearRateOverrides}
+          disabled={!hasOverrides}
+          aria-disabled={!hasOverrides}
+          title={
+            hasOverrides
+              ? "Kembalikan seluruh rate ke nilai default konfigurasi."
+              : "Belum ada perubahan rate sementara untuk direset."
+          }
+          className="rounded-md border border-ink/20 px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-cream focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/40 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Reset ke rate default
+        </button>
       </header>
 
       <div className="overflow-hidden rounded-lg border border-ink/20 bg-white/70">
@@ -120,7 +153,11 @@ export function RatePanel() {
             {/* Baris input rate untuk SETIAP level staff (Req 6.1). */}
             {ALL_STAFF_LEVELS.map((level) => {
               const totalMandays = result.totalPerLevel[level];
-              const rateValue = config.rates[level];
+              const defaultRate = config.rates[level];
+              const overrideRate = rateOverrides[level];
+              // Nilai input = rate efektif (override bila ada, selain itu default).
+              const effective = overrideRate ?? defaultRate;
+              const isOverridden = overrideRate !== undefined;
               const cost = result.costPerLevel[level];
               // Id input untuk mengaitkan label secara aksesibel.
               const inputId = `rate-input-${level}`;
@@ -137,23 +174,36 @@ export function RatePanel() {
                   <td className="px-4 py-2 text-right tabular-nums text-ink/80">
                     {formatAmount(totalMandays)}
                   </td>
-                  <td className="px-4 py-2 text-right">
+                  <td className="px-4 py-2 text-right align-top">
                     <input
                       id={inputId}
                       type="number"
                       inputMode="decimal"
                       min={0}
                       step="any"
-                      // Nilai terkontrol: kosong bila rate belum diisi (Req 6.5).
-                      value={rateValue ?? ""}
+                      // Nilai terkontrol: rate efektif; kosong bila belum ada default/override.
+                      value={effective ?? ""}
                       onChange={(e) => handleRateChange(level, e.target.value)}
                       placeholder="0"
                       aria-label={`Rate untuk ${staffLevelLabel(level)} per manday`}
-                      className="w-32 rounded-md border border-ink/20 bg-white px-2 py-1 text-right tabular-nums text-ink focus:border-ink/40 focus:outline-none focus:ring-2 focus:ring-ink/20"
+                      className={`w-32 rounded-md border bg-white px-2 py-1 text-right tabular-nums text-ink focus:border-ink/40 focus:outline-none focus:ring-2 focus:ring-ink/20 ${
+                        isOverridden ? "border-amber-400" : "border-ink/20"
+                      }`}
                     />
+                    {/* Penanda visual: bila nilai berasal dari override sesi, tampilkan
+                        rate default sebagai pembanding; bila memakai default, beri tahu. */}
+                    <div className="mt-1 text-[11px] leading-tight text-ink/50">
+                      {isOverridden ? (
+                        <span className="text-amber-700">
+                          sementara · default: {defaultRate !== undefined ? formatAmount(defaultRate) : "—"}
+                        </span>
+                      ) : (
+                        <span>default</span>
+                      )}
+                    </div>
                   </td>
-                  <td className="px-4 py-2 text-right tabular-nums text-ink">
-                    {/* Biaya level = total mandays × rate; rate kosong -> 0 (Req 6.2, 6.3). */}
+                  <td className="px-4 py-2 text-right tabular-nums text-ink align-top">
+                    {/* Biaya level = total mandays × rate efektif (Req 6.2, 6.3). */}
                     {formatAmount(cost)}
                   </td>
                 </tr>
@@ -179,11 +229,13 @@ export function RatePanel() {
         </table>
       </div>
 
-      {/* Catatan unit rate bebas: requirements tidak menetapkan mata uang spesifik. */}
+      {/* Catatan: rate dua lapis + unit bebas. */}
       <p className="mt-3 text-xs text-ink/60">
-        Catatan: unit rate bersifat bebas (mis. IDR, USD, atau satuan internal) dan
-        mengikuti kesepakatan Anda. Angka ditampilkan dengan pemisah ribuan tanpa
-        simbol mata uang.
+        Rate awal diambil dari default konfigurasi (tab Konfigurasi &rarr; Rate).
+        Perubahan di sini bersifat sementara (override sesi) dan tidak mengubah
+        default; gunakan &ldquo;Reset ke rate default&rdquo; untuk membatalkannya.
+        Unit rate bebas (mis. IDR, USD, atau satuan internal), ditampilkan dengan
+        pemisah ribuan tanpa simbol mata uang.
       </p>
     </section>
   );

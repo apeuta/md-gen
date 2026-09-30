@@ -164,7 +164,7 @@ export function resolveTaskResult(
 // Menghitung estimasi lengkap dari input (config + task terpilih + jawaban).
 // Fungsi murni: tidak mengubah input dan tidak punya efek samping.
 export function calculate(input: EstimationInput): EstimationResult {
-  const { config, selectedTaskIds, answers } = input;
+  const { config, selectedTaskIds, answers, rateOverrides } = input;
 
   const perTask: TaskResult[] = [];
   const perCategoryPerLevel: Record<string, Record<StaffLevel, number>> = {};
@@ -196,10 +196,11 @@ export function calculate(input: EstimationInput): EstimationResult {
   // Grand total mandays = jumlah seluruh mandays task (= jumlah semua role).
   const grandTotalMandays = perTask.reduce((sum, t) => sum + t.totalMandays, 0);
 
-  // Biaya per level = total mandays level * rate level (rate kosong = 0).
+  // Biaya per level = total mandays level * rate EFEKTIF level.
+  // Rate efektif: override sesi bila terdefinisi, selain itu config.rates, selain itu 0.
   const costPerLevel = emptyLevelRecord();
   for (const level of ALL_STAFF_LEVELS) {
-    const rate = config.rates[level] ?? 0;
+    const rate = rateOverrides?.[level] ?? config.rates[level] ?? 0;
     costPerLevel[level] = totalPerLevel[level] * rate;
   }
 

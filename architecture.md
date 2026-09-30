@@ -30,15 +30,15 @@ graph TD
 ## Komponen Utama
 
 - **UI Components (`app/`, `components/`)**
-  Lapisan tampilan berbasis React + Tailwind. Dua area besar: mode **Estimasi** (stepper: Pilih Task → Kuisioner → Hasil) dan mode **Konfigurasi** yang terbagi menjadi tiga sub-tab: **Task**, **Kuisioner**, dan **Import/Export**. Komponen kunci: `TaskSelector`, `Questionnaire`, `ResultsTable` (termasuk tombol Export CSV di langkah Hasil), `RatePanel`, `ConfigEditor`, `QuestionEditor` (mendukung reorder pertanyaan ↑/↓), `ImportExportPanel`.
+  Lapisan tampilan berbasis React + Tailwind. Dua area besar: mode **Estimasi** (stepper: Pilih Task → Kuisioner → Hasil) dan mode **Konfigurasi** yang terbagi menjadi empat sub-tab: **Task**, **Kuisioner**, **Rate** (mengatur rate default persisted), dan **Import/Export**. Komponen kunci: `TaskSelector`, `Questionnaire`, `ResultsTable` (menampilkan kolom **biaya per role** = mandays role × rate efektif), `ExportCsvButton` (berada di **bar navigasi** langkah Hasil, menggantikan tombol "Lanjut"), `RatePanel` (dipakai di sub-tab Rate untuk default dan di langkah Hasil untuk override sesi + tombol "Reset ke rate default"), `ConfigEditor`, `QuestionEditor` (mendukung reorder pertanyaan ↑/↓), `ImportExportPanel`.
 
 - **Config & Session State (`context/ConfigContext.tsx`)**
   Menyediakan state global via React Context, dengan pemisahan penting:
-  - **Config (persisted):** definisi kategori, task, variabel, tier, pertanyaan kuisioner, dan rate. Ini adalah aktivitas "admin" dan dipersist ke `localStorage`.
-  - **Session (ephemeral):** task yang dipilih dan jawaban kuisioner untuk estimasi saat ini. Ini adalah aktivitas "estimasi" dan hidup di memori.
+  - **Config (persisted):** definisi kategori, task, variabel, tier, pertanyaan kuisioner, dan `config.rates` (rate **default** persisted). Ini adalah aktivitas "admin" dan dipersist ke `localStorage`.
+  - **Session (ephemeral):** `selectedTaskIds` (task yang dipilih), `answers` (jawaban kuisioner), dan `rateOverrides` (override rate untuk sesi estimasi saat ini). Ini adalah aktivitas "estimasi" dan hidup di memori — `rateOverrides` tidak dipersist dan dapat dikosongkan lewat "Reset ke rate default".
 
 - **Calculation Engine (`lib/calc.ts`)**
-  Kumpulan fungsi murni (tanpa efek samping) yang menghitung hasil dari `config` + `selectedTaskIds` + `answers`. Menghasilkan mandays per task, agregasi per kategori-per-level, total per level, grand total, serta biaya (bila rate diisi). Karena murni, engine ini mudah diuji dan reaktif.
+  Kumpulan fungsi murni (tanpa efek samping) yang menghitung hasil dari `config` + `selectedTaskIds` + `answers` + `rateOverrides`. Menghasilkan mandays per task, agregasi per kategori-per-level, total per level, grand total, serta biaya. Biaya dihitung memakai **rate efektif** per level = `rateOverrides ?? config.rates ?? 0` (override sesi bila ada, selain itu rate default konfigurasi, selain itu 0). Karena murni, engine ini mudah diuji dan reaktif.
 
 - **Persistence Layer (`lib/persistence.ts`, `lib/validation.ts`)**
   Menangani load/save `localStorage`, Export JSON (unduh), Import JSON (dengan validasi skema), dan Reset ke seed. Import yang tidak valid ditolak tanpa merusak state aktif. Bila `localStorage` tidak tersedia (mode privat), aplikasi tetap jalan dengan state memori. Helper `downloadText` di modul ini dipakai untuk memicu unduhan file, baik untuk JSON konfigurasi maupun CSV hasil estimasi.

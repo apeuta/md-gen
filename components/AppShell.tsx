@@ -20,6 +20,7 @@ import { Questionnaire } from "./Questionnaire";
 import { ResultsTable } from "./ResultsTable";
 import { RatePanel } from "./RatePanel";
 import { ConfigEditor, type ConfigSubTab } from "./ConfigEditor";
+import { ExportCsvButton } from "./ExportCsvButton";
 
 // ============================================================================
 // Tipe & konstanta navigasi
@@ -35,6 +36,7 @@ type Step = 0 | 1 | 2;
 const CONFIG_SUB_TABS: { value: ConfigSubTab; label: string }[] = [
   { value: "task", label: "Task" },
   { value: "kuisioner", label: "Kuisioner" },
+  { value: "rate", label: "Rate" },
   { value: "impor", label: "Import/Export" },
 ];
 
@@ -301,14 +303,19 @@ function StepNav({ current, onChange }: StepNavProps) {
         Langkah {current + 1} dari {STEPS.length}: {STEPS[current].description}
       </span>
 
-      <button
-        type="button"
-        onClick={() => !isLast && onChange((current + 1) as Step)}
-        disabled={isLast}
-        className="rounded-md border border-ink/30 bg-ink px-4 py-2 text-sm font-medium text-cream transition-colors hover:bg-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/40 disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        Lanjut →
-      </button>
+      {/* Di langkah terakhir (Hasil), tombol navigasi kanan diganti menjadi Export CSV.
+          Di langkah lain tetap tombol "Lanjut →". */}
+      {isLast ? (
+        <ExportCsvButton />
+      ) : (
+        <button
+          type="button"
+          onClick={() => onChange((current + 1) as Step)}
+          className="rounded-md border border-ink/30 bg-ink px-4 py-2 text-sm font-medium text-cream transition-colors hover:bg-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/40 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Lanjut →
+        </button>
+      )}
     </div>
   );
 }

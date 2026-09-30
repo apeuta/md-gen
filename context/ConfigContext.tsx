@@ -24,7 +24,7 @@ import {
   type ReactNode,
 } from "react";
 
-import type { AppConfig, StaffLevel } from "../lib/types";
+import type { AppConfig, RateTable, StaffLevel } from "../lib/types";
 import { createSeedConfig } from "../lib/seed";
 import {
   exportConfig as exportConfigToFile,
@@ -56,6 +56,9 @@ export interface AppContextValue {
   // --- Session (ephemeral) ---
   selectedTaskIds: Set<string>;
   answers: Record<string, string | number>;
+  // Override rate sesi (ephemeral, TIDAK dipersist). Menimpa config.rates saat menghitung
+  // biaya pada langkah Hasil. Level yang tidak ada di sini memakai rate default config.
+  rateOverrides: RateTable;
 
   // --- Status hydration ---
   // True setelah config selesai dimuat dari localStorage saat mount.
@@ -87,6 +90,11 @@ export interface AppContextValue {
   setAnswer: (questionId: string, value: string | number) => void;
   // Menghapus jawaban sebuah pertanyaan (kembali ke default/tak terjawab).
   clearAnswer: (questionId: string) => void;
+  // Mengatur override rate sesi untuk satu level; nilai undefined menghapus override
+  // level tersebut sehingga kembali memakai rate default config.
+  setRateOverride: (level: StaffLevel, value: number | undefined) => void;
+  // Menghapus SELURUH override rate sesi (kembali ke rate default config).
+  clearRateOverrides: () => void;
 }
 
 // Context internal; diakses melalui hook useAppContext/useConfig/useSession.
@@ -111,6 +119,8 @@ export function ConfigProvider({ children }: ConfigProviderProps) {
     () => new Set<string>(),
   );
   const [answers, setAnswers] = useState<Record<string, string | number>>({});
+  // Override rate sesi: ephemeral, tidak dipersist ke localStorage.
+  const [rateOverrides, setRateOverrides] = useState<RateTable>({});
 
   // Penanda apakah config sudah dimuat dari localStorage.
   const [hydrated, setHydrated] = useState(false);
@@ -259,6 +269,26 @@ export function ConfigProvider({ children }: ConfigProviderProps) {
     });
   }, []);
 
+  const setRateOverride = useCallback(
+    (level: StaffLevel, value: number | undefined) => {
+      setRateOverrides((prev) => {
+        const next = { ...prev };
+        if (value === undefined || Number.isNaN(value)) {
+          // Hapus override -> level kembali memakai rate default config.
+          delete next[level];
+        } else {
+          next[level] = value;
+        }
+        return next;
+      });
+    },
+    [],
+  );
+
+  const clearRateOverrides = useCallback(() => {
+    setRateOverrides({});
+  }, []);
+
   // ==========================================================================
   // Nilai context (memoized)
   // ==========================================================================
@@ -268,6 +298,7 @@ export function ConfigProvider({ children }: ConfigProviderProps) {
       config,
       selectedTaskIds,
       answers,
+      rateOverrides,
       hydrated,
       setConfig,
       setRate,
@@ -280,11 +311,14 @@ export function ConfigProvider({ children }: ConfigProviderProps) {
       clearSelectedTasks,
       setAnswer,
       clearAnswer,
+      setRateOverride,
+      clearRateOverrides,
     }),
     [
       config,
       selectedTaskIds,
       answers,
+      rateOverrides,
       hydrated,
       setConfig,
       setRate,
@@ -297,6 +331,8 @@ export function ConfigProvider({ children }: ConfigProviderProps) {
       clearSelectedTasks,
       setAnswer,
       clearAnswer,
+      setRateOverride,
+      clearRateOverrides,
     ],
   );
 
@@ -346,19 +382,25 @@ export function useSession() {
   const {
     selectedTaskIds,
     answers,
+    rateOverrides,
     toggleTask,
     setTasksSelected,
     clearSelectedTasks,
     setAnswer,
     clearAnswer,
+    setRateOverride,
+    clearRateOverrides,
   } = useAppContext();
   return {
     selectedTaskIds,
     answers,
+    rateOverrides,
     toggleTask,
     setTasksSelected,
     clearSelectedTasks,
     setAnswer,
     clearAnswer,
+    setRateOverride,
+    clearRateOverrides,
   };
 }

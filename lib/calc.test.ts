@@ -380,4 +380,42 @@ describe("calculate — biaya (Req 6.2, 6.3, 6.4)", () => {
     // mandays tetap dihasilkan tanpa error walau sebagian rate kosong
     expect(result.grandTotalMandays).toBe(5);
   });
+
+  it("tanpa rateOverrides tetap memakai config.rates (kompatibilitas lama)", () => {
+    // Pemanggilan lama tanpa field rateOverrides harus tetap valid & memakai default.
+    const result = calculate({
+      config,
+      selectedTaskIds: new Set(["t-a", "t-b"]),
+      answers: {},
+    });
+    expect(result.costPerLevel.GENERAL_SA).toBe(200); // pakai default 100
+  });
+
+  it("rateOverrides menimpa config.rates untuk level yang dioverride", () => {
+    const result = calculate({
+      config,
+      selectedTaskIds: new Set(["t-a", "t-b"]),
+      answers: {},
+      // Override GENERAL_SA menjadi 150 (menimpa default 100) dan set SR_ENGINEER 50.
+      rateOverrides: { GENERAL_SA: 150, SR_ENGINEER: 50 },
+    });
+
+    expect(result.costPerLevel.GENERAL_SA).toBe(300); // 2 * 150 (override menimpa default)
+    expect(result.costPerLevel.SR_ENGINEER).toBe(150); // 3 * 50 (override pada level tanpa default)
+    expect(result.grandTotalCost).toBe(450);
+  });
+
+  it("level tanpa override memakai rate default; override 0 memaksa nol", () => {
+    const result = calculate({
+      config,
+      selectedTaskIds: new Set(["t-a", "t-b"]),
+      answers: {},
+      // GENERAL_SA dioverride jadi 0 (memaksa nol), SR_ENGINEER tidak dioverride (tetap 0 default kosong).
+      rateOverrides: { GENERAL_SA: 0 },
+    });
+
+    expect(result.costPerLevel.GENERAL_SA).toBe(0); // override 0 menimpa default 100
+    expect(result.costPerLevel.SR_ENGINEER).toBe(0); // tanpa override & tanpa default
+    expect(result.grandTotalCost).toBe(0);
+  });
 });

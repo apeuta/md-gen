@@ -37,7 +37,7 @@ import { QuestionEditor } from "./QuestionEditor";
 import { ImportExportPanel } from "./ImportExportPanel";
 
 // Sub-tab pada mode Konfigurasi. Dikendalikan oleh AppShell dan diteruskan ke ConfigEditor.
-export type ConfigSubTab = "task" | "kuisioner" | "impor";
+export type ConfigSubTab = "task" | "kuisioner" | "rate" | "impor";
 
 // ============================================================================
 // Utilitas id sederhana (MVP, tanpa dependensi eksternal)
@@ -500,6 +500,26 @@ export function ConfigEditor({ activeSubTab }: ConfigEditorProps) {
     }));
   }
 
+  // --- Rate default ---
+  // Mengubah rate default satu level pada draft. String kosong -> hapus rate level
+  // (dianggap 0 oleh Calculation Engine). Nilai negatif/NaN diabaikan (dijaga input).
+  function setDraftRate(level: StaffLevel, raw: string) {
+    setDraft((prev) => {
+      const rates = { ...prev.rates };
+      if (raw.trim() === "") {
+        delete rates[level];
+        return { ...prev, rates };
+      }
+      const parsed = Number(raw);
+      if (Number.isNaN(parsed) || parsed < 0) {
+        // Abaikan input tidak valid; pertahankan nilai sebelumnya.
+        return prev;
+      }
+      rates[level] = parsed;
+      return { ...prev, rates };
+    });
+  }
+
   // ==========================================================================
   // Aksi simpan & batal
   // ==========================================================================
@@ -537,13 +557,19 @@ export function ConfigEditor({ activeSubTab }: ConfigEditorProps) {
     return <ImportExportPanel />;
   }
 
-  // Judul & deskripsi menyesuaikan sub-tab aktif (Task atau Kuisioner).
+  // Judul & deskripsi menyesuaikan sub-tab aktif (Task / Kuisioner / Rate).
   const heading =
-    activeSubTab === "task" ? "Konfigurasi Task" : "Konfigurasi Kuisioner";
+    activeSubTab === "task"
+      ? "Konfigurasi Task"
+      : activeSubTab === "kuisioner"
+        ? "Konfigurasi Kuisioner"
+        : "Konfigurasi Rate Default";
   const description =
     activeSubTab === "task"
       ? "Kelola kategori, task, variabel, dan tier. Perubahan hanya tersimpan setelah ditekan Simpan dan lolos validasi."
-      : "Kelola pertanyaan kuisioner. Perubahan hanya tersimpan setelah ditekan Simpan dan lolos validasi.";
+      : activeSubTab === "kuisioner"
+        ? "Kelola pertanyaan kuisioner. Perubahan hanya tersimpan setelah ditekan Simpan dan lolos validasi."
+        : "Atur rate default per level (persisted). Nilai ini menjadi rate awal di tab Hasil. Kosongkan untuk dianggap nol. Perubahan tersimpan setelah ditekan Simpan.";
 
   return (
     <section className="mx-auto w-full max-w-4xl">
@@ -618,6 +644,58 @@ export function ConfigEditor({ activeSubTab }: ConfigEditorProps) {
           onQuestionChange={updateQuestion}
           onMoveQuestion={moveQuestion}
         />
+      )}
+
+      {/* Sub-tab Rate: editor rate default per level (mengedit draft.rates). */}
+      {activeSubTab === "rate" && (
+        <div className="overflow-hidden rounded-lg border border-ink/20 bg-white/70">
+          <table className="w-full border-collapse text-sm">
+            <caption className="border-b border-ink/10 px-4 py-3 text-left font-semibold text-ink">
+              Rate Default per Level (per manday)
+            </caption>
+            <thead>
+              <tr className="bg-cream text-left text-ink">
+                <th scope="col" className="px-4 py-2 font-medium">
+                  Level
+                </th>
+                <th scope="col" className="px-4 py-2 text-right font-medium">
+                  Rate default
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {ALL_STAFF_LEVELS.map((level) => {
+                const rateValue = draft.rates[level];
+                const inputId = `default-rate-${level}`;
+                return (
+                  <tr key={level} className="border-t border-ink/10">
+                    <th
+                      scope="row"
+                      className="px-4 py-2 text-left font-normal text-ink"
+                    >
+                      <label htmlFor={inputId}>{staffLevelLabel(level)}</label>
+                    </th>
+                    <td className="px-4 py-2 text-right">
+                      <input
+                        id={inputId}
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        step="any"
+                        // Kosong = rate belum diisi (dianggap 0 oleh engine).
+                        value={rateValue ?? ""}
+                        onChange={(e) => setDraftRate(level, e.target.value)}
+                        placeholder="0"
+                        aria-label={`Rate default untuk ${staffLevelLabel(level)} per manday`}
+                        className={`${inputClass} w-40 text-right tabular-nums`}
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {/* Sub-tab Task: daftar kategori/task/role/tier. */}

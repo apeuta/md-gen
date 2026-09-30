@@ -138,6 +138,10 @@ export interface EstimationInput {
   selectedTaskIds: Set<string>;
   // Jawaban pengguna: questionId -> nilai (string untuk single_choice, number untuk numeric).
   answers: Record<string, string | number>;
+  // Opsional: override rate sesi (ephemeral) yang menimpa config.rates saat menghitung biaya.
+  // Bila sebuah level tidak ada di sini, rate efektif jatuh ke config.rates lalu 0.
+  // Dibuat opsional agar pemanggilan lama (tanpa override) tetap valid.
+  rateOverrides?: RateTable;
 }
 
 // Hasil kalkulasi untuk satu role di dalam sebuah task.

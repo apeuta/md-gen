@@ -340,5 +340,28 @@ export function validateConfig(config: unknown): ValidationResult {
     });
   });
 
+  // 6. Validasi ringan rates (opsional). Bila ada, tiap nilai wajib angka non-negatif.
+  // rates boleh tidak ada atau kosong (Partial); level yang tidak diisi dianggap 0.
+  const ratesRaw = config.rates;
+  if (ratesRaw !== undefined) {
+    if (!isPlainObject(ratesRaw)) {
+      errors.push("Field 'rates' wajib berupa objek.");
+    } else {
+      for (const [level, value] of Object.entries(ratesRaw)) {
+        // Nilai undefined dianggap "tidak diisi" dan diabaikan.
+        if (value === undefined) {
+          continue;
+        }
+        if (!isFiniteNumber(value)) {
+          errors.push(`Rate untuk level '${level}' bukan angka yang valid.`);
+        } else if (value < 0) {
+          errors.push(
+            `Rate untuk level '${level}' negatif (${value}); nilai harus non-negatif.`,
+          );
+        }
+      }
+    }
+  }
+
   return { valid: errors.length === 0, errors };
 }
