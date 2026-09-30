@@ -6,7 +6,9 @@ import type {
   AppConfig,
   Category,
   Question,
+  StaffLevel,
   Task,
+  TaskRole,
   TaskVariable,
 } from "./types";
 
@@ -14,15 +16,22 @@ import type {
 // Helper pembuat task
 // ============================================================================
 
-// Membuat task sederhana tanpa variabel (baseline saja).
+// Membuat task dengan SATU role (bentuk paling umum).
+// Sejak versi 2, task terdiri dari daftar role; helper ini membungkus satu role
+// agar ringkas untuk task-task single role.
 function task(
   id: string,
   name: string,
   baselineMandays: number,
-  defaultLevel: Task["defaultLevel"],
+  level: StaffLevel,
   variable?: TaskVariable
 ): Task {
-  return { id, name, baselineMandays, defaultLevel, variable };
+  return { id, name, roles: [{ level, baselineMandays, variable }] };
+}
+
+// Membuat task dengan BEBERAPA role sekaligus (fitur multi-role versi 2).
+function multiRoleTask(id: string, name: string, roles: TaskRole[]): Task {
+  return { id, name, roles };
 }
 
 // ============================================================================
@@ -106,6 +115,12 @@ const catDesign: Category = {
     task("t-design-4", "Architecture Design Review", 1, "SR_SA"),
     task("t-design-5", "Migration Strategy Design", 1, "GENERAL_SA"),
     task("t-design-6", "Design Sign-off Meeting", 0.5, "GENERAL_PMO"),
+    // Contoh task MULTI-ROLE: satu diskusi melibatkan SA dan PMO sekaligus,
+    // masing-masing dengan baseline mandays sendiri (demonstrasi fitur versi 2).
+    multiRoleTask("t-design-7", "Project Kickoff Discussion", [
+      { level: "GENERAL_SA", baselineMandays: 0.5 },
+      { level: "GENERAL_PMO", baselineMandays: 0.5 },
+    ]),
   ],
 };
 
@@ -230,7 +245,7 @@ const catDocumentation: Category = {
 
 // Konfigurasi seed bawaan yang dipakai saat localStorage kosong (Req 9.3).
 export const seedConfig: AppConfig = {
-  version: 1,
+  version: 2,
   categories: [
     catDesign,
     catAccount,

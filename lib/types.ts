@@ -60,15 +60,25 @@ export interface TaskVariable {
   defaultTierId: string;
 }
 
+// TaskRole merepresentasikan SATU role yang terlibat dalam sebuah task.
+// Satu task kini dapat melibatkan beberapa role sekaligus (mis. SA + PMO),
+// masing-masing dengan baseline mandays dan variabel/tier sendiri.
+export interface TaskRole {
+  // Role (level staff) yang terlibat.
+  level: StaffLevel;
+  // Mandays dasar role ini bila tidak memiliki variabel.
+  baselineMandays: number;
+  // Opsional: variabel yang mengubah mandays/level role ini berdasarkan jawaban.
+  variable?: TaskVariable;
+}
+
 // Task adalah unit pekerjaan yang dapat dipilih dan diestimasi.
+// Sejak versi 2, satu task terdiri dari satu atau lebih role (minimal 1).
 export interface Task {
   id: string;
   name: string;
-  // Nilai mandays dasar bila task tidak memiliki variabel.
-  baselineMandays: number;
-  defaultLevel: StaffLevel;
-  // Opsional: variabel yang mengubah mandays/level berdasarkan jawaban.
-  variable?: TaskVariable;
+  // Daftar role yang terlibat pada task ini (wajib minimal 1 role).
+  roles: TaskRole[];
 }
 
 // Kategori mengelompokkan sekumpulan task.
@@ -130,17 +140,25 @@ export interface EstimationInput {
   answers: Record<string, string | number>;
 }
 
-// Hasil kalkulasi untuk satu task.
+// Hasil kalkulasi untuk satu role di dalam sebuah task.
+export interface RoleResult {
+  level: StaffLevel;
+  mandays: number;
+  // Tier yang terpilih bila role memiliki variabel.
+  tierId?: string;
+  // True bila jawaban ada tapi di luar rentang tier manapun (Req 3.5).
+  outOfRange?: boolean;
+}
+
+// Hasil kalkulasi untuk satu task (menggabungkan seluruh role-nya).
 export interface TaskResult {
   taskId: string;
   taskName: string;
   categoryId: string;
-  mandays: number;
-  level: StaffLevel;
-  // Tier yang terpilih bila task memiliki variabel.
-  tierId?: string;
-  // True bila jawaban ada tapi di luar rentang tier manapun (Req 3.5).
-  outOfRange?: boolean;
+  // Rincian mandays per role pada task ini.
+  roles: RoleResult[];
+  // Jumlah mandays seluruh role pada task ini.
+  totalMandays: number;
 }
 
 // Hasil kalkulasi keseluruhan.

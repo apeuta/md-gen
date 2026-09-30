@@ -12,7 +12,7 @@ import type { StaffLevel } from "./types";
 
 // Versi skema yang dikenal aplikasi saat ini (Req 8.5).
 // Selaras dengan `version` pada seedConfig.
-export const SUPPORTED_CONFIG_VERSIONS: readonly number[] = [1];
+export const SUPPORTED_CONFIG_VERSIONS: readonly number[] = [2];
 
 // Daftar level staff yang valid (harus selaras dengan tipe StaffLevel di types.ts).
 const VALID_STAFF_LEVELS: ReadonlySet<StaffLevel> = new Set<StaffLevel>([
@@ -63,6 +63,174 @@ function rangesOverlap(
   const highB = maxB ?? Number.POSITIVE_INFINITY;
   // Dua rentang inklusif tumpang tindih bila awal salah satu <= akhir yang lain di kedua arah.
   return lowA <= highB && lowB <= highA;
+}
+
+// ============================================================================
+// Validasi role (dan variabel/tier di dalamnya)
+// ============================================================================
+
+// Memvalidasi satu role: level valid, baselineMandays non-negatif, dan
+// variabel (bila ada) memenuhi seluruh aturan tier seperti sebelumnya (Req 7.6).
+function validateRole(
+  role: unknown,
+  roleIdx: number,
+  taskName: string,
+  questionIds: Set<string>,
+  errors: string[],
+): void {
+  if (!isPlainObject(role)) {
+    errors.push(
+      `Task '${taskName}' memiliki role indeks ${roleIdx} yang tidak valid: harus berupa objek.`,
+    );
+    return;
+  }
+
+  const roleLabel = `role indeks ${roleIdx}`;
+
+  // level wajib berupa level staff yang dikenal.
+  if (!VALID_STAFF_LEVELS.has(role.level as StaffLevel)) {
+    errors.push(
+      `Task '${taskName}' ${roleLabel} memiliki 'level' tidak dikenal: ${String(
+        role.level,
+      )}.`,
+    );
+  }
+
+  // baselineMandays wajib angka non-negatif (Req 7.6).
+  if (!isFiniteNumber(role.baselineMandays)) {
+    errors.push(
+      `Task '${taskName}' ${roleLabel} memiliki 'baselineMandays' yang bukan angka.`,
+    );
+  } else if (role.baselineMandays < 0) {
+    errors.push(
+      `Task '${taskName}' ${roleLabel} memiliki 'baselineMandays' negatif (${role.baselineMandays}); nilai harus non-negatif.`,
+    );
+  }
+
+  // variable opsional; bila ada, validasi seperti aturan lama.
+  const variable = role.variable;
+  if (variable === undefined) {
+    return;
+  }
+  if (!isPlainObject(variable)) {
+    errors.push(
+      `Task '${taskName}' ${roleLabel} memiliki 'variable' yang tidak valid.`,
+    );
+    return;
+  }
+
+  // Referensi questionId harus menunjuk Question yang ada (Req 7.6 / relasi model).
+  if (typeof variable.questionId !== "string") {
+    errors.push(
+      `Task '${taskName}' ${roleLabel} memiliki 'variable.questionId' yang bukan string.`,
+    );
+  } else if (!questionIds.has(variable.questionId)) {
+    errors.push(
+      `Task '${taskName}' ${roleLabel} merujuk questionId '${variable.questionId}' yang tidak ditemukan pada daftar pertanyaan.`,
+    );
+  }
+
+  // Tiers wajib array non-kosong.
+  if (!Array.isArray(variable.tiers) || variable.tiers.length === 0) {
+    errors.push(
+      `Task '${taskName}' ${roleLabel} memiliki 'variable.tiers' yang kosong atau bukan array.`,
+    );
+    return;
+  }
+
+  const tiers = variable.tiers as unknown[];
+  const tierIds = new Set<string>();
+  // Kumpulan tier numeric valid untuk pengecekan tumpang tindih.
+  const numericTiers: { id: string; min: number | null; max: number | null }[] = [];
+
+  tiers.forEach((tier, tierIdx) => {
+    if (!isPlainObject(tier)) {
+      errors.push(
+        `Task '${taskName}' ${roleLabel} memiliki tier indeks ${tierIdx} yang tidak valid.`,
+      );
+      return;
+    }
+
+    const tierId =
+      typeof tier.id === "string" && tier.id.length > 0
+        ? tier.id
+        : `indeks ${tierIdx}`;
+
+    if (typeof tier.id === "string" && tier.id.length > 0) {
+      tierIds.add(tier.id);
+    }
+
+    // mandays tier wajib non-negatif (Req 7.6).
+    if (!isFiniteNumber(tier.mandays)) {
+      errors.push(
+        `Task '${taskName}' ${roleLabel} tier '${tierId}' memiliki 'mandays' yang bukan angka.`,
+      );
+    } else if (tier.mandays < 0) {
+      errors.push(
+        `Task '${taskName}' ${roleLabel} tier '${tierId}' memiliki 'mandays' negatif (${tier.mandays}); nilai harus non-negatif.`,
+      );
+    }
+
+    // levelShift bila diisi harus level yang dikenal.
+    if (
+      tier.levelShift !== undefined &&
+      !VALID_STAFF_LEVELS.has(tier.levelShift as StaffLevel)
+    ) {
+      errors.push(
+        `Task '${taskName}' ${roleLabel} tier '${tierId}' memiliki 'levelShift' tidak dikenal: ${String(
+          tier.levelShift,
+        )}.`,
+      );
+    }
+
+    // Tier dianggap numeric HANYA bila tidak berbasis matchOptions (single_choice)
+    // dan memiliki batas min/max berupa angka (bukan sekadar null). Tier
+    // single_choice boleh menyetel min/max = null sebagai penanda "tak terbatas"
+    // tanpa dianggap numeric; memasukkannya ke cek tumpang tindih akan keliru
+    // menandai dua opsi single_choice sebagai beririsan. Hanya tier numeric
+    // yang dicek tumpang tindih (Req 7.6).
+    const minVal = tier.min;
+    const maxVal = tier.max;
+    const hasMatchOptions = Array.isArray(tier.matchOptions);
+    const minIsNumber = isFiniteNumber(minVal);
+    const maxIsNumber = isFiniteNumber(maxVal);
+    const minOk = minVal === null || minIsNumber;
+    const maxOk = maxVal === null || maxIsNumber;
+    const isNumericTier =
+      !hasMatchOptions && (minIsNumber || maxIsNumber) && minOk && maxOk;
+
+    if (isNumericTier) {
+      numericTiers.push({
+        id: tierId,
+        min: (minVal ?? null) as number | null,
+        max: (maxVal ?? null) as number | null,
+      });
+    }
+  });
+
+  // defaultTierId harus menunjuk salah satu tier yang ada (Req 7.6).
+  if (typeof variable.defaultTierId !== "string") {
+    errors.push(
+      `Task '${taskName}' ${roleLabel} memiliki 'variable.defaultTierId' yang bukan string.`,
+    );
+  } else if (!tierIds.has(variable.defaultTierId)) {
+    errors.push(
+      `Task '${taskName}' ${roleLabel} memiliki defaultTierId '${variable.defaultTierId}' yang tidak menunjuk tier manapun.`,
+    );
+  }
+
+  // Tier numeric tidak boleh tumpang tindih ambigu (Req 7.6).
+  for (let i = 0; i < numericTiers.length; i++) {
+    for (let j = i + 1; j < numericTiers.length; j++) {
+      const a = numericTiers[i];
+      const b = numericTiers[j];
+      if (rangesOverlap(a.min, a.max, b.min, b.max)) {
+        errors.push(
+          `Task '${taskName}' ${roleLabel} memiliki tier yang tumpang tindih: '${a.id}' dan '${b.id}' memiliki rentang yang beririsan.`,
+        );
+      }
+    }
+  }
 }
 
 // ============================================================================
@@ -157,148 +325,18 @@ export function validateConfig(config: unknown): ValidationResult {
           ? task.name
           : `indeks ${taskIdx}`;
 
-      // 5a. baselineMandays wajib non-negatif (Req 7.6).
-      if (!isFiniteNumber(task.baselineMandays)) {
+      // 5a. roles wajib array non-kosong (minimal 1 role per task).
+      if (!Array.isArray(task.roles) || task.roles.length === 0) {
         errors.push(
-          `Task '${taskName}' memiliki 'baselineMandays' yang bukan angka.`,
-        );
-      } else if (task.baselineMandays < 0) {
-        errors.push(
-          `Task '${taskName}' memiliki 'baselineMandays' negatif (${task.baselineMandays}); nilai harus non-negatif.`,
-        );
-      }
-
-      // 5b. defaultLevel wajib berupa level yang dikenal.
-      if (!VALID_STAFF_LEVELS.has(task.defaultLevel as StaffLevel)) {
-        errors.push(
-          `Task '${taskName}' memiliki 'defaultLevel' tidak dikenal: ${String(
-            task.defaultLevel,
-          )}.`,
-        );
-      }
-
-      // 5c. Validasi variabel task (opsional).
-      const variable = task.variable;
-      if (variable === undefined) {
-        return;
-      }
-      if (!isPlainObject(variable)) {
-        errors.push(`Task '${taskName}' memiliki 'variable' yang tidak valid.`);
-        return;
-      }
-
-      // Referensi questionId harus menunjuk Question yang ada (Req 7.6 / relasi model).
-      if (typeof variable.questionId !== "string") {
-        errors.push(
-          `Task '${taskName}' memiliki 'variable.questionId' yang bukan string.`,
-        );
-      } else if (!questionIds.has(variable.questionId)) {
-        errors.push(
-          `Task '${taskName}' merujuk questionId '${variable.questionId}' yang tidak ditemukan pada daftar pertanyaan.`,
-        );
-      }
-
-      // Tiers wajib array non-kosong.
-      if (!Array.isArray(variable.tiers) || variable.tiers.length === 0) {
-        errors.push(
-          `Task '${taskName}' memiliki 'variable.tiers' yang kosong atau bukan array.`,
+          `Task '${taskName}' memiliki 'roles' yang kosong atau bukan array; setiap task wajib punya minimal 1 role.`,
         );
         return;
       }
 
-      const tiers = variable.tiers as unknown[];
-      const tierIds = new Set<string>();
-      // Kumpulan tier numeric valid untuk pengecekan tumpang tindih.
-      const numericTiers: { id: string; min: number | null; max: number | null }[] = [];
-
-      tiers.forEach((tier, tierIdx) => {
-        if (!isPlainObject(tier)) {
-          errors.push(
-            `Task '${taskName}' memiliki tier indeks ${tierIdx} yang tidak valid.`,
-          );
-          return;
-        }
-
-        const tierId =
-          typeof tier.id === "string" && tier.id.length > 0
-            ? tier.id
-            : `indeks ${tierIdx}`;
-
-        if (typeof tier.id === "string" && tier.id.length > 0) {
-          tierIds.add(tier.id);
-        }
-
-        // mandays tier wajib non-negatif (Req 7.6).
-        if (!isFiniteNumber(tier.mandays)) {
-          errors.push(
-            `Task '${taskName}' tier '${tierId}' memiliki 'mandays' yang bukan angka.`,
-          );
-        } else if (tier.mandays < 0) {
-          errors.push(
-            `Task '${taskName}' tier '${tierId}' memiliki 'mandays' negatif (${tier.mandays}); nilai harus non-negatif.`,
-          );
-        }
-
-        // levelShift bila diisi harus level yang dikenal.
-        if (
-          tier.levelShift !== undefined &&
-          !VALID_STAFF_LEVELS.has(tier.levelShift as StaffLevel)
-        ) {
-          errors.push(
-            `Task '${taskName}' tier '${tierId}' memiliki 'levelShift' tidak dikenal: ${String(
-              tier.levelShift,
-            )}.`,
-          );
-        }
-
-        // Tier dianggap numeric HANYA bila tidak berbasis matchOptions (single_choice)
-        // dan memiliki batas min/max berupa angka (bukan sekadar null). Tier
-        // single_choice boleh menyetel min/max = null sebagai penanda "tak terbatas"
-        // tanpa dianggap numeric; memasukkannya ke cek tumpang tindih akan keliru
-        // menandai dua opsi single_choice sebagai beririsan. Hanya tier numeric
-        // yang dicek tumpang tindih (Req 7.6).
-        const minVal = tier.min;
-        const maxVal = tier.max;
-        const hasMatchOptions = Array.isArray(tier.matchOptions);
-        const minIsNumber = isFiniteNumber(minVal);
-        const maxIsNumber = isFiniteNumber(maxVal);
-        const minOk = minVal === null || minIsNumber;
-        const maxOk = maxVal === null || maxIsNumber;
-        const isNumericTier =
-          !hasMatchOptions && (minIsNumber || maxIsNumber) && minOk && maxOk;
-
-        if (isNumericTier) {
-          numericTiers.push({
-            id: tierId,
-            min: (minVal ?? null) as number | null,
-            max: (maxVal ?? null) as number | null,
-          });
-        }
+      // 5b. Validasi tiap role di dalam task.
+      (task.roles as unknown[]).forEach((role, roleIdx) => {
+        validateRole(role, roleIdx, taskName, questionIds, errors);
       });
-
-      // defaultTierId harus menunjuk salah satu tier yang ada (Req 7.6).
-      if (typeof variable.defaultTierId !== "string") {
-        errors.push(
-          `Task '${taskName}' memiliki 'variable.defaultTierId' yang bukan string.`,
-        );
-      } else if (!tierIds.has(variable.defaultTierId)) {
-        errors.push(
-          `Task '${taskName}' memiliki defaultTierId '${variable.defaultTierId}' yang tidak menunjuk tier manapun.`,
-        );
-      }
-
-      // Tier numeric tidak boleh tumpang tindih ambigu (Req 7.6).
-      for (let i = 0; i < numericTiers.length; i++) {
-        for (let j = i + 1; j < numericTiers.length; j++) {
-          const a = numericTiers[i];
-          const b = numericTiers[j];
-          if (rangesOverlap(a.min, a.max, b.min, b.max)) {
-            errors.push(
-              `Task '${taskName}' memiliki tier yang tumpang tindih: '${a.id}' dan '${b.id}' memiliki rentang yang beririsan.`,
-            );
-          }
-        }
-      }
     });
   });
 

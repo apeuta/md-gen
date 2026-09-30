@@ -4,8 +4,8 @@
 //
 // Fungsi utama:
 // - Hanya merender pertanyaan yang RELEVAN, yaitu pertanyaan yang direferensikan oleh
-//   task terpilih melalui task.variable.questionId (Req 2.1, 2.4). Pertanyaan yang tidak
-//   dirujuk task terpilih manapun disembunyikan.
+//   role dari task terpilih melalui role.variable.questionId (Req 2.1, 2.4). Pertanyaan
+//   yang tidak dirujuk task terpilih manapun disembunyikan.
 // - Pertanyaan dikelompokkan per kategori (Question.categoryId); hanya kategori yang
 //   memiliki minimal satu pertanyaan relevan yang ditampilkan.
 // - Mendukung tipe pertanyaan single_choice (radio) dan numeric (input number) (Req 2.2).
@@ -29,13 +29,17 @@ export function Questionnaire() {
   const { selectedTaskIds, answers, setAnswer } = useSession();
 
   // Kumpulkan questionId yang direferensikan oleh task terpilih (Req 2.1, 2.4).
-  // Iterasi kategori → task; ambil variable.questionId hanya bila task terpilih & punya variable.
+  // Iterasi kategori → task → role; ambil variable.questionId dari setiap role terpilih
+  // yang memiliki variable (satu task kini bisa punya beberapa role dengan variabel berbeda).
   const referencedQuestionIds = useMemo(() => {
     const ids = new Set<string>();
     for (const category of config.categories) {
       for (const task of category.tasks) {
-        if (selectedTaskIds.has(task.id) && task.variable) {
-          ids.add(task.variable.questionId);
+        if (!selectedTaskIds.has(task.id)) continue;
+        for (const role of task.roles) {
+          if (role.variable) {
+            ids.add(role.variable.questionId);
+          }
         }
       }
     }

@@ -140,8 +140,8 @@ interface CategoryTableProps {
 }
 
 function CategoryTable({ categoryName, tasks, subtotal }: CategoryTableProps) {
-  // Subtotal mandays seluruh task pada kategori ini.
-  const categoryTotal = tasks.reduce((sum, task) => sum + task.mandays, 0);
+  // Subtotal mandays seluruh task pada kategori ini (menjumlahkan semua role).
+  const categoryTotal = tasks.reduce((sum, task) => sum + task.totalMandays, 0);
 
   // Daftar level yang terpakai pada kategori ini, untuk ringkasan subtotal per level.
   const levels = subtotal ? usedLevels(subtotal) : [];
@@ -166,25 +166,10 @@ function CategoryTable({ categoryName, tasks, subtotal }: CategoryTableProps) {
           </tr>
         </thead>
         <tbody>
+          {/* Setiap task ditampilkan sebagai baris judul, lalu satu sub-baris per role
+              berisi (level, mandays, penanda out-of-range per role) (Req 5.1, 3.5). */}
           {tasks.map((task) => (
-            <tr key={task.taskId} className="border-t border-ink/10">
-              <th scope="row" className="px-4 py-2 text-left font-normal text-ink">
-                {task.taskName}
-                {/* Penanda out-of-range: jawaban di luar rentang tier, memakai default (Req 3.5). */}
-                {task.outOfRange && (
-                  <span
-                    className="ml-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800"
-                    title="Jawaban di luar rentang tier, memakai tier default."
-                  >
-                    di luar rentang
-                  </span>
-                )}
-              </th>
-              <td className="px-4 py-2 text-right tabular-nums text-ink">
-                {formatMandays(task.mandays)}
-              </td>
-              <td className="px-4 py-2 text-ink">{staffLevelLabel(task.level)}</td>
-            </tr>
+            <TaskRows key={task.taskId} task={task} />
           ))}
         </tbody>
         <tfoot>
@@ -211,6 +196,77 @@ function CategoryTable({ categoryName, tasks, subtotal }: CategoryTableProps) {
         </tfoot>
       </table>
     </div>
+  );
+}
+
+// ============================================================================
+// Sub-komponen: baris satu task (judul task + sub-baris per role)
+// ============================================================================
+
+function TaskRows({ task }: { task: TaskResult }) {
+  // Task dengan satu role: tampilkan judul + rincian pada baris yang sama untuk ringkas.
+  // Task dengan >1 role: tampilkan judul task, lalu satu baris untuk tiap role.
+  const isSingleRole = task.roles.length === 1;
+
+  if (isSingleRole) {
+    const role = task.roles[0];
+    return (
+      <tr className="border-t border-ink/10">
+        <th scope="row" className="px-4 py-2 text-left font-normal text-ink">
+          {task.taskName}
+          {role.outOfRange && <OutOfRangeBadge />}
+        </th>
+        <td className="px-4 py-2 text-right tabular-nums text-ink">
+          {formatMandays(role.mandays)}
+        </td>
+        <td className="px-4 py-2 text-ink">{staffLevelLabel(role.level)}</td>
+      </tr>
+    );
+  }
+
+  return (
+    <>
+      {/* Baris judul task (multi-role): total mandays seluruh role task. */}
+      <tr className="border-t border-ink/10 bg-cream/30">
+        <th scope="row" className="px-4 py-2 text-left font-medium text-ink">
+          {task.taskName}
+        </th>
+        <td className="px-4 py-2 text-right tabular-nums font-medium text-ink">
+          {formatMandays(task.totalMandays)}
+        </td>
+        <td className="px-4 py-2 text-xs text-ink/60">
+          {task.roles.length} role
+        </td>
+      </tr>
+      {/* Sub-baris per role. */}
+      {task.roles.map((role, idx) => (
+        <tr key={`${task.taskId}-${idx}`} className="border-t border-ink/5">
+          <th
+            scope="row"
+            className="px-4 py-1.5 pl-8 text-left font-normal text-ink/80"
+          >
+            ↳ {staffLevelLabel(role.level)}
+            {role.outOfRange && <OutOfRangeBadge />}
+          </th>
+          <td className="px-4 py-1.5 text-right tabular-nums text-ink/80">
+            {formatMandays(role.mandays)}
+          </td>
+          <td className="px-4 py-1.5 text-ink/80">{staffLevelLabel(role.level)}</td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+// Penanda visual bila jawaban di luar rentang tier (per role) (Req 3.5).
+function OutOfRangeBadge() {
+  return (
+    <span
+      className="ml-2 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800"
+      title="Jawaban di luar rentang tier, memakai tier default."
+    >
+      di luar rentang
+    </span>
   );
 }
 

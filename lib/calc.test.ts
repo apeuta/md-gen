@@ -3,7 +3,13 @@
 // Validates: Requirements 3.2, 3.3, 3.5, 4.2, 4.4, 5.5, 6.2, 6.3, 6.4
 
 import { describe, it, expect } from "vitest";
-import { calculate, selectTier, resolveTaskResult, ALL_STAFF_LEVELS } from "./calc";
+import {
+  calculate,
+  selectTier,
+  resolveTaskResult,
+  resolveRoleResult,
+  ALL_STAFF_LEVELS,
+} from "./calc";
 import type { AppConfig, Category, Question, Task, TaskVariable } from "./types";
 
 // ============================================================================
@@ -16,7 +22,7 @@ function makeConfig(
   questions: Question[] = [],
   rates: AppConfig["rates"] = {}
 ): AppConfig {
-  return { version: 1, categories, questions, rates };
+  return { version: 2, categories, questions, rates };
 }
 
 // Variabel numeric contoh: jumlah subnet dengan 3 tier + default ke tier terkecil.
@@ -106,18 +112,16 @@ describe("selectTier — variabel single_choice (Req 3.2)", () => {
 });
 
 // ============================================================================
-// resolveTaskResult — hasil per task
+// resolveRoleResult — hasil per role
 // ============================================================================
 
-describe("resolveTaskResult — task tanpa variabel (Req 3.4, 4.5)", () => {
-  it("memakai baselineMandays dan defaultLevel", () => {
-    const t: Task = {
-      id: "t-plain",
-      name: "Task Tanpa Variabel",
-      baselineMandays: 2,
-      defaultLevel: "GENERAL_SA",
-    };
-    const r = resolveTaskResult(t, "cat-1", {}, []);
+describe("resolveRoleResult — role tanpa variabel (Req 3.4, 4.5)", () => {
+  it("memakai baselineMandays dan level role", () => {
+    const r = resolveRoleResult(
+      { level: "GENERAL_SA", baselineMandays: 2 },
+      {},
+      []
+    );
     expect(r.mandays).toBe(2);
     expect(r.level).toBe("GENERAL_SA");
     expect(r.tierId).toBeUndefined();
@@ -125,52 +129,70 @@ describe("resolveTaskResult — task tanpa variabel (Req 3.4, 4.5)", () => {
   });
 });
 
-describe("resolveTaskResult — tier terpilih & level shift (Req 3.3, 4.2)", () => {
-  const taskWithChoice: Task = {
-    id: "t-consult",
-    name: "Konsultasi Desain",
+describe("resolveRoleResult — tier terpilih & level shift (Req 3.3, 4.2)", () => {
+  const roleWithChoice = {
+    level: "GENERAL_ENGINEER" as const,
     baselineMandays: 0,
-    defaultLevel: "GENERAL_ENGINEER",
     variable: choiceVariable,
   };
 
   it("memakai mandays tier dan menggeser level bila tier punya levelShift", () => {
-    const r = resolveTaskResult(taskWithChoice, "cat-1", { "q-consult": "ya" }, [qConsult]);
+    const r = resolveRoleResult(roleWithChoice, { "q-consult": "ya" }, [qConsult]);
     expect(r.mandays).toBe(1);
     expect(r.level).toBe("SR_ENGINEER");
     expect(r.tierId).toBe("c-ya");
     expect(r.outOfRange).toBeFalsy();
   });
 
-  it("mempertahankan defaultLevel bila tier terpilih tidak punya levelShift (Req 4.5)", () => {
-    const r = resolveTaskResult(taskWithChoice, "cat-1", { "q-consult": "tidak" }, [qConsult]);
+  it("mempertahankan level role bila tier terpilih tidak punya levelShift (Req 4.5)", () => {
+    const r = resolveRoleResult(roleWithChoice, { "q-consult": "tidak" }, [qConsult]);
     expect(r.mandays).toBe(0);
     expect(r.level).toBe("GENERAL_ENGINEER");
     expect(r.tierId).toBe("c-tidak");
   });
 });
 
-describe("resolveTaskResult — default & out-of-range (Req 2.3, 3.5)", () => {
-  const taskWithNumeric: Task = {
-    id: "t-vpc",
-    name: "Configure VPC",
+describe("resolveRoleResult — default & out-of-range (Req 2.3, 3.5)", () => {
+  const roleWithNumeric = {
+    level: "GENERAL_ENGINEER" as const,
     baselineMandays: 0,
-    defaultLevel: "GENERAL_ENGINEER",
     variable: numericVariable,
   };
 
   it("pakai defaultTierId tanpa outOfRange bila jawaban tidak ada", () => {
-    const r = resolveTaskResult(taskWithNumeric, "cat-1", {}, [qSubnet]);
+    const r = resolveRoleResult(roleWithNumeric, {}, [qSubnet]);
     expect(r.tierId).toBe("t-1-2");
     expect(r.mandays).toBe(0.5);
     expect(r.outOfRange).toBeFalsy();
   });
 
   it("pakai defaultTierId DAN set outOfRange bila jawaban ada tapi di luar rentang", () => {
-    const r = resolveTaskResult(taskWithNumeric, "cat-1", { "q-subnet": 0 }, [qSubnet]);
+    const r = resolveRoleResult(roleWithNumeric, { "q-subnet": 0 }, [qSubnet]);
     expect(r.tierId).toBe("t-1-2");
     expect(r.mandays).toBe(0.5);
     expect(r.outOfRange).toBe(true);
+  });
+});
+
+// ============================================================================
+// resolveTaskResult — menggabungkan seluruh role
+// ============================================================================
+
+describe("resolveTaskResult — task multi-role (fitur versi 2)", () => {
+  it("menghitung semua role dan menjumlahkan totalMandays", () => {
+    const t: Task = {
+      id: "t-discuss",
+      name: "Diskusi",
+      roles: [
+        { level: "GENERAL_SA", baselineMandays: 0.5 },
+        { level: "GENERAL_PMO", baselineMandays: 0.5 },
+      ],
+    };
+    const r = resolveTaskResult(t, "cat-1", {}, []);
+    expect(r.roles).toHaveLength(2);
+    expect(r.roles[0].level).toBe("GENERAL_SA");
+    expect(r.roles[1].level).toBe("GENERAL_PMO");
+    expect(r.totalMandays).toBe(1);
   });
 });
 
@@ -184,7 +206,13 @@ describe("calculate — input kosong (Req 5.5)", () => {
       {
         id: "cat-1",
         name: "Kategori 1",
-        tasks: [{ id: "t-1", name: "Task 1", baselineMandays: 3, defaultLevel: "GENERAL_SA" }],
+        tasks: [
+          {
+            id: "t-1",
+            name: "Task 1",
+            roles: [{ level: "GENERAL_SA", baselineMandays: 3 }],
+          },
+        ],
       },
     ]);
     const result = calculate({ config, selectedTaskIds: new Set(), answers: {} });
@@ -210,16 +238,24 @@ describe("calculate — agregasi per level (Req 5.2, 5.3, 5.4)", () => {
           {
             id: "t-vpc",
             name: "Configure VPC",
-            baselineMandays: 0,
-            defaultLevel: "GENERAL_ENGINEER",
-            variable: numericVariable,
+            roles: [
+              {
+                level: "GENERAL_ENGINEER",
+                baselineMandays: 0,
+                variable: numericVariable,
+              },
+            ],
           },
           {
             id: "t-consult",
             name: "Konsultasi Desain",
-            baselineMandays: 0,
-            defaultLevel: "GENERAL_ENGINEER",
-            variable: choiceVariable,
+            roles: [
+              {
+                level: "GENERAL_ENGINEER",
+                baselineMandays: 0,
+                variable: choiceVariable,
+              },
+            ],
           },
         ],
       },
@@ -227,7 +263,11 @@ describe("calculate — agregasi per level (Req 5.2, 5.3, 5.4)", () => {
         id: "cat-2",
         name: "Design",
         tasks: [
-          { id: "t-doc", name: "Dokumentasi", baselineMandays: 2, defaultLevel: "GENERAL_SA" },
+          {
+            id: "t-doc",
+            name: "Dokumentasi",
+            roles: [{ level: "GENERAL_SA", baselineMandays: 2 }],
+          },
         ],
       },
     ],
@@ -262,6 +302,46 @@ describe("calculate — agregasi per level (Req 5.2, 5.3, 5.4)", () => {
   });
 });
 
+describe("calculate — task multi-role menjumlahkan ke dua level berbeda (fitur versi 2)", () => {
+  const config = makeConfig([
+    {
+      id: "cat-1",
+      name: "Design",
+      tasks: [
+        {
+          id: "t-discuss",
+          name: "Kickoff Discussion",
+          roles: [
+            { level: "GENERAL_SA", baselineMandays: 0.5 },
+            { level: "GENERAL_PMO", baselineMandays: 0.5 },
+          ],
+        },
+      ],
+    },
+  ]);
+
+  it("mengakumulasi mandays setiap role ke level masing-masing", () => {
+    const result = calculate({
+      config,
+      selectedTaskIds: new Set(["t-discuss"]),
+      answers: {},
+    });
+
+    // Satu task, dua role.
+    expect(result.perTask).toHaveLength(1);
+    expect(result.perTask[0].roles).toHaveLength(2);
+    expect(result.perTask[0].totalMandays).toBe(1);
+
+    // Kedua level terisi masing-masing 0.5.
+    expect(result.totalPerLevel.GENERAL_SA).toBe(0.5);
+    expect(result.totalPerLevel.GENERAL_PMO).toBe(0.5);
+    expect(result.perCategoryPerLevel["cat-1"].GENERAL_SA).toBe(0.5);
+    expect(result.perCategoryPerLevel["cat-1"].GENERAL_PMO).toBe(0.5);
+
+    expect(result.grandTotalMandays).toBe(1);
+  });
+});
+
 describe("calculate — biaya (Req 6.2, 6.3, 6.4)", () => {
   const config = makeConfig(
     [
@@ -269,8 +349,16 @@ describe("calculate — biaya (Req 6.2, 6.3, 6.4)", () => {
         id: "cat-1",
         name: "Kategori 1",
         tasks: [
-          { id: "t-a", name: "A", baselineMandays: 2, defaultLevel: "GENERAL_SA" },
-          { id: "t-b", name: "B", baselineMandays: 3, defaultLevel: "SR_ENGINEER" },
+          {
+            id: "t-a",
+            name: "A",
+            roles: [{ level: "GENERAL_SA", baselineMandays: 2 }],
+          },
+          {
+            id: "t-b",
+            name: "B",
+            roles: [{ level: "SR_ENGINEER", baselineMandays: 3 }],
+          },
         ],
       },
     ],

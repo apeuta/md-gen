@@ -7,8 +7,10 @@ import type {
   EstimationResult,
   Question,
   QuestionType,
+  RoleResult,
   StaffLevel,
   Task,
+  TaskRole,
   TaskResult,
   Tier,
   TaskVariable,
@@ -75,29 +77,25 @@ function findDefaultTier(variable: TaskVariable): Tier | undefined {
   return variable.tiers.find((tier) => tier.id === variable.defaultTierId);
 }
 
-// Menyelesaikan hasil kalkulasi untuk satu task.
-// Mengimplementasikan algoritma per-task dari design.md:
-// 1. Tanpa variable -> baselineMandays + defaultLevel.
+// Menyelesaikan hasil kalkulasi untuk SATU role di dalam task.
+// Mengimplementasikan algoritma per-role:
+// 1. Tanpa variable -> baselineMandays + level role.
 // 2. Dengan variable -> pilih tier dari jawaban, fallback ke defaultTierId,
 //    set outOfRange hanya bila jawaban ADA tapi di luar seluruh rentang tier.
-export function resolveTaskResult(
-  task: Task,
-  categoryId: string,
+export function resolveRoleResult(
+  role: TaskRole,
   answers: Record<string, string | number>,
   questions: Question[]
-): TaskResult {
-  // Kasus tanpa variabel: pakai baseline dan level default (Req 3.4, 4.5).
-  if (!task.variable) {
+): RoleResult {
+  // Kasus tanpa variabel: pakai baseline dan level role (Req 3.4, 4.5).
+  if (!role.variable) {
     return {
-      taskId: task.id,
-      taskName: task.name,
-      categoryId,
-      mandays: task.baselineMandays,
-      level: task.defaultLevel,
+      level: role.level,
+      mandays: role.baselineMandays,
     };
   }
 
-  const variable = task.variable;
+  const variable = role.variable;
   const answer = answers[variable.questionId];
   const hasAnswer = answer !== undefined && answer !== null && answer !== "";
 
@@ -122,27 +120,40 @@ export function resolveTaskResult(
     }
   }
 
-  // Bila defaultTierId pun tidak valid, fallback aman ke baseline task.
+  // Bila defaultTierId pun tidak valid, fallback aman ke baseline role.
   if (!tier) {
     return {
-      taskId: task.id,
-      taskName: task.name,
-      categoryId,
-      mandays: task.baselineMandays,
-      level: task.defaultLevel,
+      level: role.level,
+      mandays: role.baselineMandays,
       outOfRange: hasAnswer ? true : undefined,
     };
   }
 
   return {
+    level: tier.levelShift ?? role.level,
+    mandays: tier.mandays,
+    tierId: tier.id,
+    outOfRange: outOfRange ? true : undefined,
+  };
+}
+
+// Menyelesaikan hasil kalkulasi untuk satu task dengan menghitung SEMUA role-nya.
+export function resolveTaskResult(
+  task: Task,
+  categoryId: string,
+  answers: Record<string, string | number>,
+  questions: Question[]
+): TaskResult {
+  const roles = task.roles.map((role) =>
+    resolveRoleResult(role, answers, questions)
+  );
+  const totalMandays = roles.reduce((sum, r) => sum + r.mandays, 0);
+  return {
     taskId: task.id,
     taskName: task.name,
     categoryId,
-    mandays: tier.mandays,
-    // Geser level bila tier punya levelShift, jika tidak pakai level default (Req 4.2, 4.5).
-    level: tier.levelShift ?? task.defaultLevel,
-    tierId: tier.id,
-    outOfRange: outOfRange ? true : undefined,
+    roles,
+    totalMandays,
   };
 }
 
@@ -174,14 +185,16 @@ export function calculate(input: EstimationInput): EstimationResult {
         perCategoryPerLevel[category.id] = emptyLevelRecord();
       }
 
-      // Akumulasi per (kategori, level) dan per level global.
-      perCategoryPerLevel[category.id][result.level] += result.mandays;
-      totalPerLevel[result.level] += result.mandays;
+      // Akumulasi SETIAP role ke level masing-masing (per kategori & global).
+      for (const roleResult of result.roles) {
+        perCategoryPerLevel[category.id][roleResult.level] += roleResult.mandays;
+        totalPerLevel[roleResult.level] += roleResult.mandays;
+      }
     }
   }
 
-  // Grand total mandays = jumlah seluruh mandays task.
-  const grandTotalMandays = perTask.reduce((sum, t) => sum + t.mandays, 0);
+  // Grand total mandays = jumlah seluruh mandays task (= jumlah semua role).
+  const grandTotalMandays = perTask.reduce((sum, t) => sum + t.totalMandays, 0);
 
   // Biaya per level = total mandays level * rate level (rate kosong = 0).
   const costPerLevel = emptyLevelRecord();

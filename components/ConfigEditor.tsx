@@ -29,6 +29,7 @@ import type {
   Question,
   StaffLevel,
   Task,
+  TaskRole,
   TaskVariable,
   Tier,
 } from "../lib/types";
@@ -71,9 +72,11 @@ function collectIds(config: AppConfig): Set<string> {
     ids.add(cat.id);
     for (const t of cat.tasks) {
       ids.add(t.id);
-      if (t.variable) {
-        for (const tier of t.variable.tiers) {
-          ids.add(tier.id);
+      for (const role of t.roles) {
+        if (role.variable) {
+          for (const tier of role.variable.tiers) {
+            ids.add(tier.id);
+          }
         }
       }
     }
@@ -185,11 +188,11 @@ export function ConfigEditor() {
     setDraft((prev) => {
       const existing = collectIds(prev);
       const id = uniqueId("t", "task baru", existing);
+      // Task baru dibuat dengan satu role default (tanpa variable).
       const newTask: Task = {
         id,
         name: "Task Baru",
-        baselineMandays: 1,
-        defaultLevel: "GENERAL_ENGINEER",
+        roles: [{ level: "GENERAL_ENGINEER", baselineMandays: 1 }],
       };
       const categories = prev.categories.map((c, i) =>
         i === catIdx ? { ...c, tasks: [...c.tasks, newTask] } : c,
@@ -209,23 +212,77 @@ export function ConfigEditor() {
     updateTask(catIdx, taskIdx, (t) => ({ ...t, name }));
   }
 
-  function setTaskBaseline(catIdx: number, taskIdx: number, raw: string) {
-    // Simpan sebagai angka; string kosong dianggap 0. Validasi non-negatif dilakukan saat simpan.
-    const parsed = raw.trim() === "" ? 0 : Number(raw);
+  // Menggeser posisi task dalam kategori: dir -1 (ke atas) atau +1 (ke bawah).
+  // Tidak melakukan apa-apa bila sudah di ujung.
+  function moveTask(catIdx: number, taskIdx: number, dir: -1 | 1) {
+    updateCategory(catIdx, (cat) => {
+      const target = taskIdx + dir;
+      if (target < 0 || target >= cat.tasks.length) return cat;
+      const tasks = [...cat.tasks];
+      const [moved] = tasks.splice(taskIdx, 1);
+      tasks.splice(target, 0, moved);
+      return { ...cat, tasks };
+    });
+  }
+
+  // --- Role ---
+
+  // Mengganti satu role pada task tertentu dengan hasil fungsi updater.
+  function updateRole(
+    catIdx: number,
+    taskIdx: number,
+    roleIdx: number,
+    updater: (role: TaskRole) => TaskRole,
+  ) {
     updateTask(catIdx, taskIdx, (t) => ({
       ...t,
-      baselineMandays: Number.isNaN(parsed) ? t.baselineMandays : parsed,
+      roles: t.roles.map((r, i) => (i === roleIdx ? updater(r) : r)),
     }));
   }
 
-  function setTaskLevel(catIdx: number, taskIdx: number, level: StaffLevel) {
-    updateTask(catIdx, taskIdx, (t) => ({ ...t, defaultLevel: level }));
+  // Menambahkan role baru ke task (default GENERAL_ENGINEER, baseline 1, tanpa variable).
+  function addRole(catIdx: number, taskIdx: number) {
+    updateTask(catIdx, taskIdx, (t) => ({
+      ...t,
+      roles: [...t.roles, { level: "GENERAL_ENGINEER", baselineMandays: 1 }],
+    }));
   }
 
-  // --- Variabel task ---
+  // Menghapus role dari task; task wajib menyisakan minimal 1 role.
+  function removeRole(catIdx: number, taskIdx: number, roleIdx: number) {
+    updateTask(catIdx, taskIdx, (t) => {
+      if (t.roles.length <= 1) return t;
+      return { ...t, roles: t.roles.filter((_, i) => i !== roleIdx) };
+    });
+  }
 
-  // Menambahkan variabel default pada task (dengan satu tier awal sebagai default).
-  function addVariable(catIdx: number, taskIdx: number) {
+  function setRoleBaseline(
+    catIdx: number,
+    taskIdx: number,
+    roleIdx: number,
+    raw: string,
+  ) {
+    // Simpan sebagai angka; string kosong dianggap 0. Validasi non-negatif saat simpan.
+    const parsed = raw.trim() === "" ? 0 : Number(raw);
+    updateRole(catIdx, taskIdx, roleIdx, (r) => ({
+      ...r,
+      baselineMandays: Number.isNaN(parsed) ? r.baselineMandays : parsed,
+    }));
+  }
+
+  function setRoleLevel(
+    catIdx: number,
+    taskIdx: number,
+    roleIdx: number,
+    level: StaffLevel,
+  ) {
+    updateRole(catIdx, taskIdx, roleIdx, (r) => ({ ...r, level }));
+  }
+
+  // --- Variabel role ---
+
+  // Menambahkan variabel default pada role (dengan satu tier awal sebagai default).
+  function addVariable(catIdx: number, taskIdx: number, roleIdx: number) {
     setDraft((prev) => {
       const existing = collectIds(prev);
       const firstQuestionId = prev.questions[0]?.id ?? "";
@@ -248,7 +305,14 @@ export function ConfigEditor() {
           ? {
               ...c,
               tasks: c.tasks.map((t, j) =>
-                j === taskIdx ? { ...t, variable } : t,
+                j === taskIdx
+                  ? {
+                      ...t,
+                      roles: t.roles.map((r, k) =>
+                        k === roleIdx ? { ...r, variable } : r,
+                      ),
+                    }
+                  : t,
               ),
             }
           : c,
@@ -257,10 +321,10 @@ export function ConfigEditor() {
     });
   }
 
-  // Menghapus variabel dari task (task kembali memakai baseline).
-  function removeVariable(catIdx: number, taskIdx: number) {
-    updateTask(catIdx, taskIdx, (t) => {
-      const { variable: _drop, ...rest } = t;
+  // Menghapus variabel dari role (role kembali memakai baseline).
+  function removeVariable(catIdx: number, taskIdx: number, roleIdx: number) {
+    updateRole(catIdx, taskIdx, roleIdx, (r) => {
+      const { variable: _drop, ...rest } = r;
       return { ...rest };
     });
   }
@@ -268,26 +332,28 @@ export function ConfigEditor() {
   function setVariableQuestion(
     catIdx: number,
     taskIdx: number,
+    roleIdx: number,
     questionId: string,
   ) {
-    updateTask(catIdx, taskIdx, (t) =>
-      t.variable ? { ...t, variable: { ...t.variable, questionId } } : t,
+    updateRole(catIdx, taskIdx, roleIdx, (r) =>
+      r.variable ? { ...r, variable: { ...r.variable, questionId } } : r,
     );
   }
 
   function setVariableDefaultTier(
     catIdx: number,
     taskIdx: number,
+    roleIdx: number,
     tierId: string,
   ) {
-    updateTask(catIdx, taskIdx, (t) =>
-      t.variable ? { ...t, variable: { ...t.variable, defaultTierId: tierId } } : t,
+    updateRole(catIdx, taskIdx, roleIdx, (r) =>
+      r.variable ? { ...r, variable: { ...r.variable, defaultTierId: tierId } } : r,
     );
   }
 
   // --- Tier ---
 
-  function addTier(catIdx: number, taskIdx: number) {
+  function addTier(catIdx: number, taskIdx: number, roleIdx: number) {
     setDraft((prev) => {
       const existing = collectIds(prev);
       const tierId = uniqueId("tier", "baru", existing);
@@ -303,13 +369,19 @@ export function ConfigEditor() {
         return {
           ...c,
           tasks: c.tasks.map((t, j) => {
-            if (j !== taskIdx || !t.variable) return t;
+            if (j !== taskIdx) return t;
             return {
               ...t,
-              variable: {
-                ...t.variable,
-                tiers: [...t.variable.tiers, newTier],
-              },
+              roles: t.roles.map((r, k) => {
+                if (k !== roleIdx || !r.variable) return r;
+                return {
+                  ...r,
+                  variable: {
+                    ...r.variable,
+                    tiers: [...r.variable.tiers, newTier],
+                  },
+                };
+              }),
             };
           }),
         };
@@ -318,17 +390,22 @@ export function ConfigEditor() {
     });
   }
 
-  function removeTier(catIdx: number, taskIdx: number, tierIdx: number) {
-    updateTask(catIdx, taskIdx, (t) => {
-      if (!t.variable) return t;
-      const tiers = t.variable.tiers.filter((_, i) => i !== tierIdx);
+  function removeTier(
+    catIdx: number,
+    taskIdx: number,
+    roleIdx: number,
+    tierIdx: number,
+  ) {
+    updateRole(catIdx, taskIdx, roleIdx, (r) => {
+      if (!r.variable) return r;
+      const tiers = r.variable.tiers.filter((_, i) => i !== tierIdx);
       // Bila defaultTierId menunjuk tier yang dihapus, alihkan ke tier pertama tersisa.
-      const removedId = t.variable.tiers[tierIdx]?.id;
+      const removedId = r.variable.tiers[tierIdx]?.id;
       const defaultTierId =
-        t.variable.defaultTierId === removedId
+        r.variable.defaultTierId === removedId
           ? tiers[0]?.id ?? ""
-          : t.variable.defaultTierId;
-      return { ...t, variable: { ...t.variable, tiers, defaultTierId } };
+          : r.variable.defaultTierId;
+      return { ...r, variable: { ...r.variable, tiers, defaultTierId } };
     });
   }
 
@@ -336,15 +413,16 @@ export function ConfigEditor() {
   function updateTier(
     catIdx: number,
     taskIdx: number,
+    roleIdx: number,
     tierIdx: number,
     updater: (tier: Tier) => Tier,
   ) {
-    updateTask(catIdx, taskIdx, (t) => {
-      if (!t.variable) return t;
-      const tiers = t.variable.tiers.map((tier, i) =>
+    updateRole(catIdx, taskIdx, roleIdx, (r) => {
+      if (!r.variable) return r;
+      const tiers = r.variable.tiers.map((tier, i) =>
         i === tierIdx ? updater(tier) : tier,
       );
-      return { ...t, variable: { ...t.variable, tiers } };
+      return { ...r, variable: { ...r.variable, tiers } };
     });
   }
 
@@ -550,25 +628,37 @@ export function ConfigEditor() {
                   task={task}
                   questions={draft.questions}
                   onRename={(name) => renameTask(catIdx, taskIdx, name)}
-                  onBaselineChange={(raw) =>
-                    setTaskBaseline(catIdx, taskIdx, raw)
-                  }
-                  onLevelChange={(level) => setTaskLevel(catIdx, taskIdx, level)}
                   onRemove={() => removeTask(catIdx, taskIdx)}
-                  onAddVariable={() => addVariable(catIdx, taskIdx)}
-                  onRemoveVariable={() => removeVariable(catIdx, taskIdx)}
-                  onQuestionChange={(qid) =>
-                    setVariableQuestion(catIdx, taskIdx, qid)
+                  onMoveUp={() => moveTask(catIdx, taskIdx, -1)}
+                  onMoveDown={() => moveTask(catIdx, taskIdx, 1)}
+                  canMoveUp={taskIdx > 0}
+                  canMoveDown={taskIdx < category.tasks.length - 1}
+                  onAddRole={() => addRole(catIdx, taskIdx)}
+                  onRemoveRole={(roleIdx) => removeRole(catIdx, taskIdx, roleIdx)}
+                  onRoleBaselineChange={(roleIdx, raw) =>
+                    setRoleBaseline(catIdx, taskIdx, roleIdx, raw)
                   }
-                  onDefaultTierChange={(tid) =>
-                    setVariableDefaultTier(catIdx, taskIdx, tid)
+                  onRoleLevelChange={(roleIdx, level) =>
+                    setRoleLevel(catIdx, taskIdx, roleIdx, level)
                   }
-                  onAddTier={() => addTier(catIdx, taskIdx)}
-                  onRemoveTier={(tierIdx) =>
-                    removeTier(catIdx, taskIdx, tierIdx)
+                  onAddVariable={(roleIdx) =>
+                    addVariable(catIdx, taskIdx, roleIdx)
                   }
-                  onTierChange={(tierIdx, updater) =>
-                    updateTier(catIdx, taskIdx, tierIdx, updater)
+                  onRemoveVariable={(roleIdx) =>
+                    removeVariable(catIdx, taskIdx, roleIdx)
+                  }
+                  onQuestionChange={(roleIdx, qid) =>
+                    setVariableQuestion(catIdx, taskIdx, roleIdx, qid)
+                  }
+                  onDefaultTierChange={(roleIdx, tid) =>
+                    setVariableDefaultTier(catIdx, taskIdx, roleIdx, tid)
+                  }
+                  onAddTier={(roleIdx) => addTier(catIdx, taskIdx, roleIdx)}
+                  onRemoveTier={(roleIdx, tierIdx) =>
+                    removeTier(catIdx, taskIdx, roleIdx, tierIdx)
+                  }
+                  onTierChange={(roleIdx, tierIdx, updater) =>
+                    updateTier(catIdx, taskIdx, roleIdx, tierIdx, updater)
                   }
                   parseNullableNumber={parseNullableNumber}
                 />
@@ -598,16 +688,26 @@ interface TaskRowProps {
   task: Task;
   questions: AppConfig["questions"];
   onRename: (name: string) => void;
-  onBaselineChange: (raw: string) => void;
-  onLevelChange: (level: StaffLevel) => void;
   onRemove: () => void;
-  onAddVariable: () => void;
-  onRemoveVariable: () => void;
-  onQuestionChange: (questionId: string) => void;
-  onDefaultTierChange: (tierId: string) => void;
-  onAddTier: () => void;
-  onRemoveTier: (tierIdx: number) => void;
-  onTierChange: (tierIdx: number, updater: (tier: Tier) => Tier) => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onAddRole: () => void;
+  onRemoveRole: (roleIdx: number) => void;
+  onRoleBaselineChange: (roleIdx: number, raw: string) => void;
+  onRoleLevelChange: (roleIdx: number, level: StaffLevel) => void;
+  onAddVariable: (roleIdx: number) => void;
+  onRemoveVariable: (roleIdx: number) => void;
+  onQuestionChange: (roleIdx: number, questionId: string) => void;
+  onDefaultTierChange: (roleIdx: number, tierId: string) => void;
+  onAddTier: (roleIdx: number) => void;
+  onRemoveTier: (roleIdx: number, tierIdx: number) => void;
+  onTierChange: (
+    roleIdx: number,
+    tierIdx: number,
+    updater: (tier: Tier) => Tier,
+  ) => void;
   parseNullableNumber: (raw: string) => number | null;
 }
 
@@ -615,9 +715,15 @@ function TaskRow({
   task,
   questions,
   onRename,
-  onBaselineChange,
-  onLevelChange,
   onRemove,
+  onMoveUp,
+  onMoveDown,
+  canMoveUp,
+  canMoveDown,
+  onAddRole,
+  onRemoveRole,
+  onRoleBaselineChange,
+  onRoleLevelChange,
   onAddVariable,
   onRemoveVariable,
   onQuestionChange,
@@ -629,7 +735,7 @@ function TaskRow({
 }: TaskRowProps) {
   return (
     <div className="rounded-md border border-ink/10 bg-cream/40 p-3">
-      {/* Atribut dasar task */}
+      {/* Header task: nama + tambah role + hapus task */}
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex flex-1 flex-col gap-1">
           <label htmlFor={`task-name-${task.id}`} className={labelClass}>
@@ -644,29 +750,126 @@ function TaskRow({
           />
         </div>
 
-        <div className="flex flex-col gap-1">
-          <label htmlFor={`task-baseline-${task.id}`} className={labelClass}>
-            Baseline mandays
-          </label>
-          <input
-            id={`task-baseline-${task.id}`}
-            type="number"
-            inputMode="decimal"
-            min={0}
-            step="any"
-            value={task.baselineMandays}
-            onChange={(e) => onBaselineChange(e.target.value)}
-            className={`${inputClass} w-32 text-right tabular-nums`}
-          />
+        <button type="button" className={btnGhost} onClick={onAddRole}>
+          + Tambah role
+        </button>
+
+        {/* Tombol geser urutan task (ke atas/bawah) dalam kategori */}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            className={`${btnGhost} disabled:opacity-40 disabled:cursor-not-allowed`}
+            onClick={onMoveUp}
+            disabled={!canMoveUp}
+            aria-disabled={!canMoveUp}
+            aria-label="Geser task ke atas"
+            title="Geser ke atas"
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            className={`${btnGhost} disabled:opacity-40 disabled:cursor-not-allowed`}
+            onClick={onMoveDown}
+            disabled={!canMoveDown}
+            aria-disabled={!canMoveDown}
+            aria-label="Geser task ke bawah"
+            title="Geser ke bawah"
+          >
+            ↓
+          </button>
         </div>
 
+        <button type="button" className={btnDanger} onClick={onRemove}>
+          Hapus task
+        </button>
+      </div>
+
+      {/* Daftar ROLE pada task ini (masing-masing punya baseline & variabel/tier sendiri) */}
+      <div className="mt-3 flex flex-col gap-3">
+        {task.roles.map((role, roleIdx) => (
+          <RoleEditor
+            key={`${task.id}-role-${roleIdx}`}
+            taskId={task.id}
+            role={role}
+            roleIdx={roleIdx}
+            canRemove={task.roles.length > 1}
+            questions={questions}
+            onRemoveRole={() => onRemoveRole(roleIdx)}
+            onBaselineChange={(raw) => onRoleBaselineChange(roleIdx, raw)}
+            onLevelChange={(level) => onRoleLevelChange(roleIdx, level)}
+            onAddVariable={() => onAddVariable(roleIdx)}
+            onRemoveVariable={() => onRemoveVariable(roleIdx)}
+            onQuestionChange={(qid) => onQuestionChange(roleIdx, qid)}
+            onDefaultTierChange={(tid) => onDefaultTierChange(roleIdx, tid)}
+            onAddTier={() => onAddTier(roleIdx)}
+            onRemoveTier={(tierIdx) => onRemoveTier(roleIdx, tierIdx)}
+            onTierChange={(tierIdx, updater) =>
+              onTierChange(roleIdx, tierIdx, updater)
+            }
+            parseNullableNumber={parseNullableNumber}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Sub-komponen: editor satu ROLE (level + baseline + variabel + tier)
+// ============================================================================
+
+interface RoleEditorProps {
+  taskId: string;
+  role: TaskRole;
+  roleIdx: number;
+  canRemove: boolean;
+  questions: AppConfig["questions"];
+  onRemoveRole: () => void;
+  onBaselineChange: (raw: string) => void;
+  onLevelChange: (level: StaffLevel) => void;
+  onAddVariable: () => void;
+  onRemoveVariable: () => void;
+  onQuestionChange: (questionId: string) => void;
+  onDefaultTierChange: (tierId: string) => void;
+  onAddTier: () => void;
+  onRemoveTier: (tierIdx: number) => void;
+  onTierChange: (tierIdx: number, updater: (tier: Tier) => Tier) => void;
+  parseNullableNumber: (raw: string) => number | null;
+}
+
+function RoleEditor({
+  taskId,
+  role,
+  roleIdx,
+  canRemove,
+  questions,
+  onRemoveRole,
+  onBaselineChange,
+  onLevelChange,
+  onAddVariable,
+  onRemoveVariable,
+  onQuestionChange,
+  onDefaultTierChange,
+  onAddTier,
+  onRemoveTier,
+  onTierChange,
+  parseNullableNumber,
+}: RoleEditorProps) {
+  // Prefix id unik per role agar label/kontrol tidak bentrok antar role.
+  const rid = `${taskId}-r${roleIdx}`;
+
+  return (
+    <div className="rounded-md border border-ink/15 bg-white/50 p-3">
+      {/* Atribut dasar role */}
+      <div className="flex flex-wrap items-end gap-3">
         <div className="flex flex-col gap-1">
-          <label htmlFor={`task-level-${task.id}`} className={labelClass}>
-            Level default
+          <label htmlFor={`role-level-${rid}`} className={labelClass}>
+            Level (role)
           </label>
           <select
-            id={`task-level-${task.id}`}
-            value={task.defaultLevel}
+            id={`role-level-${rid}`}
+            value={role.level}
             onChange={(e) => onLevelChange(e.target.value as StaffLevel)}
             className={`${inputClass} w-40`}
           >
@@ -678,19 +881,38 @@ function TaskRow({
           </select>
         </div>
 
-        <button type="button" className={btnDanger} onClick={onRemove}>
-          Hapus task
+        <div className="flex flex-col gap-1">
+          <label htmlFor={`role-baseline-${rid}`} className={labelClass}>
+            Baseline mandays
+          </label>
+          <input
+            id={`role-baseline-${rid}`}
+            type="number"
+            inputMode="decimal"
+            min={0}
+            step="any"
+            value={role.baselineMandays}
+            onChange={(e) => onBaselineChange(e.target.value)}
+            className={`${inputClass} w-32 text-right tabular-nums`}
+          />
+        </div>
+
+        <button
+          type="button"
+          className={btnDanger}
+          onClick={onRemoveRole}
+          disabled={!canRemove}
+          aria-disabled={!canRemove}
+          title={canRemove ? undefined : "Task wajib punya minimal 1 role."}
+        >
+          Hapus role
         </button>
       </div>
 
-      {/* Bagian variabel */}
+      {/* Bagian variabel (per role) */}
       <div className="mt-3 border-t border-ink/10 pt-3">
-        {!task.variable ? (
-          <button
-            type="button"
-            className={btnGhost}
-            onClick={onAddVariable}
-          >
+        {!role.variable ? (
+          <button type="button" className={btnGhost} onClick={onAddVariable}>
             + Tambah variabel (tier)
           </button>
         ) : (
@@ -698,15 +920,12 @@ function TaskRow({
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div className="flex flex-wrap items-end gap-3">
                 <div className="flex flex-col gap-1">
-                  <label
-                    htmlFor={`var-question-${task.id}`}
-                    className={labelClass}
-                  >
+                  <label htmlFor={`var-question-${rid}`} className={labelClass}>
                     Pertanyaan (questionId)
                   </label>
                   <select
-                    id={`var-question-${task.id}`}
-                    value={task.variable.questionId}
+                    id={`var-question-${rid}`}
+                    value={role.variable.questionId}
                     onChange={(e) => onQuestionChange(e.target.value)}
                     className={`${inputClass} w-64`}
                   >
@@ -724,18 +943,18 @@ function TaskRow({
 
                 <div className="flex flex-col gap-1">
                   <label
-                    htmlFor={`var-default-tier-${task.id}`}
+                    htmlFor={`var-default-tier-${rid}`}
                     className={labelClass}
                   >
                     Tier default
                   </label>
                   <select
-                    id={`var-default-tier-${task.id}`}
-                    value={task.variable.defaultTierId}
+                    id={`var-default-tier-${rid}`}
+                    value={role.variable.defaultTierId}
                     onChange={(e) => onDefaultTierChange(e.target.value)}
                     className={`${inputClass} w-48`}
                   >
-                    {task.variable.tiers.map((tier) => (
+                    {role.variable.tiers.map((tier) => (
                       <option key={tier.id} value={tier.id}>
                         {tier.label} [{tier.id}]
                       </option>
@@ -760,7 +979,7 @@ function TaskRow({
 
             {/* Daftar tier */}
             <div className="flex flex-col gap-2">
-              {task.variable.tiers.map((tier, tierIdx) => (
+              {role.variable.tiers.map((tier, tierIdx) => (
                 <div
                   key={tier.id}
                   className="flex flex-wrap items-end gap-2 rounded-md border border-ink/10 bg-white/60 p-2"

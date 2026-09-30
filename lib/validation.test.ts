@@ -32,29 +32,32 @@ function makeValidConfig(): AppConfig {
         {
           id: "t-vpc",
           name: "Configure VPC",
-          baselineMandays: 0,
-          defaultLevel: "GENERAL_ENGINEER",
-          variable: {
-            questionId: "q-subnet",
-            defaultTierId: "t-1-2",
-            tiers: [
-              { id: "t-1-2", label: "1-2", min: 1, max: 2, mandays: 0.5 },
-              { id: "t-3-5", label: "3-5", min: 3, max: 5, mandays: 0.8 },
-              { id: "t-gt5", label: ">5", min: 6, max: null, mandays: 1.2 },
-            ],
-          },
+          roles: [
+            {
+              level: "GENERAL_ENGINEER",
+              baselineMandays: 0,
+              variable: {
+                questionId: "q-subnet",
+                defaultTierId: "t-1-2",
+                tiers: [
+                  { id: "t-1-2", label: "1-2", min: 1, max: 2, mandays: 0.5 },
+                  { id: "t-3-5", label: "3-5", min: 3, max: 5, mandays: 0.8 },
+                  { id: "t-gt5", label: ">5", min: 6, max: null, mandays: 1.2 },
+                ],
+              },
+            },
+          ],
         },
         {
           id: "t-plain",
           name: "Task Tanpa Variabel",
-          baselineMandays: 2,
-          defaultLevel: "GENERAL_SA",
+          roles: [{ level: "GENERAL_SA", baselineMandays: 2 }],
         },
       ],
     },
   ];
 
-  return { version: 1, categories, questions, rates: { GENERAL_SA: 100 } };
+  return { version: 2, categories, questions, rates: { GENERAL_SA: 100 } };
 }
 
 // ============================================================================
@@ -118,9 +121,9 @@ describe("validateConfig — struktur array (Req 8.5)", () => {
 // ============================================================================
 
 describe("validateConfig — nilai mandays non-negatif (Req 7.6)", () => {
-  it("menolak baselineMandays negatif", () => {
+  it("menolak baselineMandays role yang negatif", () => {
     const config = makeValidConfig();
-    config.categories[0].tasks[1].baselineMandays = -1;
+    config.categories[0].tasks[1].roles[0].baselineMandays = -1;
     const result = validateConfig(config);
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
@@ -128,11 +131,50 @@ describe("validateConfig — nilai mandays non-negatif (Req 7.6)", () => {
 
   it("menolak mandays tier yang negatif", () => {
     const config = makeValidConfig();
-    // Tier pertama pada task variabel dibuat negatif.
-    config.categories[0].tasks[0].variable!.tiers[0].mandays = -0.5;
+    // Tier pertama pada role dengan variabel dibuat negatif.
+    config.categories[0].tasks[0].roles[0].variable!.tiers[0].mandays = -0.5;
     const result = validateConfig(config);
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
+  });
+});
+
+// ============================================================================
+// roles wajib non-kosong & level valid (fitur versi 2)
+// ============================================================================
+
+describe("validateConfig — roles wajib valid (fitur versi 2)", () => {
+  it("menolak task dengan roles kosong", () => {
+    const config = makeValidConfig();
+    config.categories[0].tasks[1].roles = [];
+    const result = validateConfig(config);
+    expect(result.valid).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+  });
+
+  it("menolak role dengan level tak dikenal", () => {
+    const config = makeValidConfig();
+    // Level sengaja dirusak menjadi nilai yang tidak dikenal.
+    (config.categories[0].tasks[1].roles[0] as { level: string }).level =
+      "TIDAK_DIKENAL";
+    const result = validateConfig(config);
+    expect(result.valid).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+  });
+
+  it("meloloskan task multi-role yang valid", () => {
+    const config = makeValidConfig();
+    config.categories[0].tasks.push({
+      id: "t-multi",
+      name: "Diskusi",
+      roles: [
+        { level: "GENERAL_SA", baselineMandays: 0.5 },
+        { level: "GENERAL_PMO", baselineMandays: 0.5 },
+      ],
+    });
+    const result = validateConfig(config);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
   });
 });
 
@@ -144,7 +186,7 @@ describe("validateConfig — tier tidak boleh tumpang tindih ambigu (Req 7.6)", 
   it("menolak dua tier numeric dengan rentang yang saling tumpang tindih", () => {
     const config = makeValidConfig();
     // Tier "t-1-2" (1..2) dan "t-3-5" diubah menjadi (2..5) -> nilai 2 cocok keduanya.
-    config.categories[0].tasks[0].variable!.tiers[1].min = 2;
+    config.categories[0].tasks[0].roles[0].variable!.tiers[1].min = 2;
     const result = validateConfig(config);
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
@@ -158,7 +200,8 @@ describe("validateConfig — tier tidak boleh tumpang tindih ambigu (Req 7.6)", 
 describe("validateConfig — defaultTierId valid (Req 7.6)", () => {
   it("menolak defaultTierId yang tidak menunjuk tier manapun", () => {
     const config = makeValidConfig();
-    config.categories[0].tasks[0].variable!.defaultTierId = "tier-tidak-ada";
+    config.categories[0].tasks[0].roles[0].variable!.defaultTierId =
+      "tier-tidak-ada";
     const result = validateConfig(config);
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
@@ -172,7 +215,7 @@ describe("validateConfig — defaultTierId valid (Req 7.6)", () => {
 describe("validateConfig — referensi questionId valid (Req 7.6)", () => {
   it("menolak variable.questionId yang tidak menunjuk Question manapun", () => {
     const config = makeValidConfig();
-    config.categories[0].tasks[0].variable!.questionId = "q-tidak-ada";
+    config.categories[0].tasks[0].roles[0].variable!.questionId = "q-tidak-ada";
     const result = validateConfig(config);
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
