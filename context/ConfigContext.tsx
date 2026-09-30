@@ -39,6 +39,7 @@ import {
   changeAdminPassword as changeAdminPasswordAuth,
   clearAdminPassword as clearAdminPasswordAuth,
   isAdminConfigured as isAdminConfiguredAuth,
+  isEnvAuthMode as isEnvAuthModeAuth,
   setAdminPassword as setAdminPasswordAuth,
   verifyAdminPassword as verifyAdminPasswordAuth,
 } from "../lib/auth";
@@ -113,6 +114,10 @@ export interface AppContextValue {
   // Apakah password admin sudah pernah dibuat (dibaca dari localStorage saat mount
   // & di-refresh setiap set/ganti/clear). Awal false di server untuk hindari mismatch.
   isAdminConfigured: boolean;
+  // Apakah aplikasi berjalan dalam MODE ENV (password admin global via env var Vercel
+  // NEXT_PUBLIC_ADMIN_AUTH). Dibaca setelah mount agar tidak memicu hydration mismatch.
+  // Bila true: UI selalu tampilkan login (tanpa buat-password / reset / ganti password).
+  envAuthMode: boolean;
   // Login admin: verifikasi password; bila cocok set role "admin" & return true.
   loginAdmin: (password: string) => Promise<boolean>;
   // Logout admin: kembalikan role ke "user".
@@ -162,6 +167,9 @@ export function ConfigProvider({ children }: ConfigProviderProps) {
   // Apakah password admin sudah dikonfigurasi. Awal false agar render server & client
   // pertama identik; dibaca dari localStorage setelah mount (mirip pola loadConfig).
   const [isAdminConfigured, setIsAdminConfigured] = useState(false);
+  // Apakah MODE ENV aktif. Awal false agar render server & client pertama identik;
+  // dihitung dari isEnvAuthMode() setelah mount (mirip pola isAdminConfigured).
+  const [envAuthMode, setEnvAuthMode] = useState(false);
 
   // Ref timer untuk debounce auto-save.
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -172,8 +180,10 @@ export function ConfigProvider({ children }: ConfigProviderProps) {
     const loaded = loadConfig();
     setConfigState(loaded);
     setHydrated(true);
+    // Baca MODE ENV setelah mount untuk hindari hydration mismatch (di server awal false).
+    setEnvAuthMode(isEnvAuthModeAuth());
     // Baca status konfigurasi admin dari localStorage setelah mount untuk hindari
-    // hydration mismatch (di server nilainya selalu false).
+    // hydration mismatch (di server nilainya selalu false). Di mode ENV nilainya true.
     setIsAdminConfigured(isAdminConfiguredAuth());
     // Sengaja hanya dijalankan sekali saat mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -404,6 +414,7 @@ export function ConfigProvider({ children }: ConfigProviderProps) {
       clearRateOverrides,
       role,
       isAdminConfigured,
+      envAuthMode,
       loginAdmin,
       logoutAdmin,
       createAdminPassword,
@@ -431,6 +442,7 @@ export function ConfigProvider({ children }: ConfigProviderProps) {
       clearRateOverrides,
       role,
       isAdminConfigured,
+      envAuthMode,
       loginAdmin,
       logoutAdmin,
       createAdminPassword,
@@ -513,6 +525,7 @@ export function useAuth() {
   const {
     role,
     isAdminConfigured,
+    envAuthMode,
     loginAdmin,
     logoutAdmin,
     createAdminPassword,
@@ -522,6 +535,7 @@ export function useAuth() {
   return {
     role,
     isAdminConfigured,
+    envAuthMode,
     loginAdmin,
     logoutAdmin,
     createAdminPassword,

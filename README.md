@@ -28,6 +28,15 @@ Alur autentikasi:
 
 > **Batasan keamanan (PENTING).** Ini adalah **gerbang UI praktis untuk pilot, bukan keamanan sungguhan**. Karena aplikasi sepenuhnya client-side, siapa pun yang teknis bisa membuka `localStorage`/DevTools dan melihat record auth atau melewati gate. Password **tidak pernah** disimpan plaintext: yang disimpan hanya **salt acak + hash SHA-256(salt + password)** (Web Crypto) pada key terpisah `mandays-generator:admin-auth`. Record ini **tidak ikut Export JSON** konfigurasi. Untuk keamanan sebenarnya, dibutuhkan autentikasi berbasis backend — di luar cakupan pilot ini.
 
+### Dua mode sumber password admin
+
+Aplikasi mendukung dua mode untuk menentukan password admin:
+
+- **MODE ENV (global, konsisten semua browser)** — aktif bila environment variable `NEXT_PUBLIC_ADMIN_AUTH` diisi (lihat [Deploy ke Vercel](#deploy-ke-vercel)). Password menjadi **global**: sama di semua browser, device, maupun incognito, karena bukan lagi disimpan per-`localStorage`. Dalam mode ini gerbang **selalu** menampilkan form Login (tanpa alur buat-password, ganti password, atau reset dari UI). Ganti password dilakukan dengan memperbarui env var lalu **redeploy**.
+- **MODE LOCAL (per-browser)** — aktif bila `NEXT_PUBLIC_ADMIN_AUTH` **tidak** diset. Ini perilaku default: password dibuat first-run dan disimpan di `localStorage` **per-browser**, sehingga di incognito/device lain akan diminta membuat password lagi. Tersedia alur ganti password dan reset (lupa password).
+
+> **Kenapa env var berisi hash, bukan password?** App ini client-side; env var yang dibaca di client **harus** berprefix `NEXT_PUBLIC_` dan nilainya **ter-embed di bundle** JavaScript. Karena itu env var menyimpan **hash** (`salt:hash`), bukan password asli, agar password tidak muncul di bundle/repo. Ini tetap **gerbang UI**, bukan keamanan backend — hash tetap terlihat di bundle bagi yang teknis.
+
 **Mode Konfigurasi**
 Mode ini terbagi menjadi empat sub-tab: **Task**, **Kuisioner**, **Rate**, dan **Import/Export**. Hanya bisa diakses setelah login sebagai admin.
 - **Task:** CRUD kategori, task, variabel task, dan tier (dengan validasi tolak-simpan bila data tidak valid). Tambah beberapa role per task — tiap role punya level, baseline mandays, dan tier sendiri. Ubah urutan task dalam sebuah kategori lewat tombol geser atas/bawah (↑/↓).
@@ -85,14 +94,15 @@ npm run lint
 
 ## Deploy ke Vercel
 
-Aplikasi ini adalah proyek Next.js standar **tanpa environment variable wajib**, jadi deploy-nya langsung.
+Aplikasi ini adalah proyek Next.js standar **tanpa environment variable wajib**, jadi deploy-nya langsung. Env var `NEXT_PUBLIC_ADMIN_AUTH` bersifat **opsional** — set bila ingin password admin global (MODE ENV), lewati bila cukup password per-browser (MODE LOCAL).
 
 **Opsi A — via Dashboard Vercel:**
 1. Push repository ini ke GitHub/GitLab/Bitbucket.
 2. Di [vercel.com](https://vercel.com), pilih **Add New → Project** lalu import repo tersebut.
 3. Set **Root Directory** ke `mandays-generator/` (bila repo berisi folder lain di root).
-4. Vercel mendeteksi framework **Next.js** secara otomatis — biarkan build command dan output default. Tidak perlu menambahkan env var.
-5. Klik **Deploy**.
+4. Vercel mendeteksi framework **Next.js** secara otomatis — biarkan build command dan output default.
+5. (Opsional) Untuk password admin global, tambahkan env var `NEXT_PUBLIC_ADMIN_AUTH` (lihat di bawah).
+6. Klik **Deploy**.
 
 **Opsi B — via Vercel CLI:**
 
@@ -102,6 +112,30 @@ cd mandays-generator
 vercel          # deploy preview
 vercel --prod   # deploy production
 ```
+
+### Konfigurasi password admin global (opsional, MODE ENV)
+
+Bila ingin password admin **konsisten di semua browser/device/incognito**, set env var `NEXT_PUBLIC_ADMIN_AUTH`. Nilainya berformat `<saltHex>:<hashHex>` — bukan password plaintext. Buat nilainya dengan skrip generator bawaan (tanpa dependency):
+
+```bash
+node scripts/gen-admin-hash.mjs '<password-admin-anda>'
+```
+
+Skrip mencetak baris siap pakai, misalnya:
+
+```
+NEXT_PUBLIC_ADMIN_AUTH=3f9a...c1:8b2e...ff
+```
+
+Lalu di Vercel:
+1. Buka **Project Settings → Environment Variables**.
+2. Tambahkan variabel `NEXT_PUBLIC_ADMIN_AUTH` dengan **Value** = string `salt:hash` dari skrip (bagian setelah tanda `=`).
+3. Pilih environment (Production/Preview/Development) sesuai kebutuhan, simpan.
+4. **Redeploy** aplikasi agar nilai baru ter-embed ke bundle.
+
+Setelah mode ENV aktif, gerbang admin **selalu** menampilkan form Login (tanpa buat-password/ganti/reset dari UI), dan **incognito maupun device lain kini konsisten** memakai password yang sama. Untuk **mengganti password**: jalankan ulang skrip dengan password baru, perbarui env var, lalu redeploy.
+
+> **Penegasan keamanan.** Nilai `NEXT_PUBLIC_ADMIN_AUTH` ter-embed di bundle client (itulah sifat prefix `NEXT_PUBLIC_`). Yang di-embed hanyalah **hash**, bukan password asli, sehingga password tidak bocor di bundle/repo — tetapi hash tetap dapat dilihat orang teknis. Ini **tetap gerbang UI client-side**, bukan keamanan berbasis backend. Jangan menaruh password plaintext di env var.
 
 ## Struktur Proyek
 

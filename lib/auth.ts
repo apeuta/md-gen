@@ -19,6 +19,18 @@
 // Seluruh akses browser API (window/localStorage) di-guard (typeof window) agar aman
 // dijalankan saat SSR / lingkungan Node dan tidak pernah throw. Web Crypto diakses via
 // globalThis.crypto?.subtle; bila tidak tersedia, fungsi async menolak dengan aman.
+//
+// DUA MODE SUMBER PASSWORD:
+// 1. MODE ENV — bila env var NEXT_PUBLIC_ADMIN_AUTH ada & valid (format "salt:hash",
+//    keduanya hex non-kosong). Password menjadi GLOBAL & konsisten di semua browser
+//    (incognito/device lain sama). Sumber kebenaran = env var, bukan localStorage.
+//    Alur buat/ganti/reset TIDAK berlaku (dikelola via env var + redeploy di Vercel).
+//    PENTING: karena app ini client-side, env var yang dibaca di client HARUS berprefix
+//    NEXT_PUBLIC_ dan nilainya TER-EMBED di bundle. Karena itu env var berisi HASH
+//    (bukan plaintext) agar password asli tidak muncul di bundle/repo. Ini tetap gate
+//    UI, bukan keamanan kuat.
+// 2. MODE LOCAL — bila env var tidak ada. Perilaku lama: localStorage per-browser,
+//    first-run buat password, ganti, reset. Password tidak konsisten antar-browser.
 
 // ============================================================================
 // Konstanta
@@ -194,19 +206,91 @@ function isValidAuthRecord(value: unknown): value is AdminAuthRecord {
 }
 
 // ============================================================================
+// Mode ENV (env var Vercel NEXT_PUBLIC_ADMIN_AUTH)
+// ============================================================================
+
+// Nama env var yang menyimpan kredensial admin global (format "salt:hash").
+// Prefix NEXT_PUBLIC_ WAJIB agar terbaca di client (nilainya di-inline ke bundle).
+export const ADMIN_AUTH_ENV_KEY = "NEXT_PUBLIC_ADMIN_AUTH";
+
+// Bentuk kredensial env yang sudah di-parse.
+export interface EnvAuth {
+  salt: string;
+  hash: string;
+}
+
+// Regex hex non-kosong (huruf besar/kecil diizinkan).
+const HEX_RE = /^[0-9a-fA-F]+$/;
+
+// Fungsi murni: parse string mentah env var berformat "<saltHex>:<hashHex>".
+// Return objek {salt, hash} bila valid (tepat satu ':' dan kedua sisi hex non-kosong),
+// atau null bila undefined/kosong/format salah. Dibuat murni agar mudah dites tanpa
+// bergantung pada process.env secara langsung.
+export function parseEnvAuth(raw: string | undefined): EnvAuth | null {
+  if (typeof raw !== "string") {
+    return null;
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+  // Harus tepat berformat "salt:hash" (satu pemisah ':').
+  const parts = trimmed.split(":");
+  if (parts.length !== 2) {
+    return null;
+  }
+  const [salt, hash] = parts;
+  if (salt.length === 0 || hash.length === 0) {
+    return null;
+  }
+  if (!HEX_RE.test(salt) || !HEX_RE.test(hash)) {
+    return null;
+  }
+  // Normalisasi ke lowercase agar konsisten dengan output hashPassword (selalu lowercase
+  // hex) saat perbandingan constant-time, apa pun kapitalisasi yang diisi di env var.
+  return { salt: salt.toLowerCase(), hash: hash.toLowerCase() };
+}
+
+// Membaca kredensial env dari process.env.NEXT_PUBLIC_ADMIN_AUTH lalu mem-parse-nya.
+// Return null bila tidak ada/invalid. Karena NEXT_PUBLIC_ di-inline saat build, akses
+// ini aman baik di server maupun client.
+export function getEnvAuth(): EnvAuth | null {
+  // Guard: process bisa tidak ada di sebagian lingkungan; jangan sampai throw.
+  const env = typeof process !== "undefined" ? process.env : undefined;
+  return parseEnvAuth(env?.[ADMIN_AUTH_ENV_KEY]);
+}
+
+// True bila aplikasi berjalan dalam MODE ENV (kredensial env valid tersedia).
+export function isEnvAuthMode(): boolean {
+  return getEnvAuth() !== null;
+}
+
+// ============================================================================
 // API publik
 // ============================================================================
 
-// True bila record auth admin ada & valid di localStorage.
+// True bila password admin dianggap sudah dikonfigurasi.
+// - MODE ENV: selalu true (dikonfigurasi lewat env var).
+// - MODE LOCAL: true bila record auth ada & valid di localStorage.
 // Dipakai UI untuk membedakan alur first-run (buat password) vs login.
 export function isAdminConfigured(): boolean {
+  if (isEnvAuthMode()) {
+    return true;
+  }
   return readAuthRecord() !== null;
 }
 
 // Set password admin baru: generate salt acak, hitung hash, simpan record.
 // Dipakai untuk set awal (first-run) maupun mengganti password.
 // Melempar error terkontrol bila Web Crypto tidak tersedia.
+//
+// MODE ENV: no-op aman (resolve tanpa menulis). Password dikelola lewat env var +
+// redeploy, sehingga first-run "buat password" tidak berlaku. UI juga menyembunyikan
+// alur ini, tetapi kita tetap jaga di sini agar tidak menimpa/menyentuh localStorage.
 export async function setAdminPassword(newPassword: string): Promise<void> {
+  if (isEnvAuthMode()) {
+    return;
+  }
   const saltHex = generateSaltHex();
   const hash = await hashPassword(saltHex, newPassword);
   const record: AdminAuthRecord = {
@@ -218,10 +302,23 @@ export async function setAdminPassword(newPassword: string): Promise<void> {
   writeAuthRecord(record);
 }
 
-// Verifikasi password terhadap record tersimpan.
-// Mengembalikan false secara aman bila: belum ada record, storage/crypto tidak tersedia,
-// atau password salah. Perbandingan hash memakai constant-time sederhana.
+// Verifikasi password terhadap sumber kebenaran aktif.
+// - MODE ENV: hitung SHA-256(saltEnv + password) lalu bandingkan constant-time dengan
+//   hash dari env. Konsisten dengan skema hashPassword (salt + password, output hex).
+// - MODE LOCAL: bandingkan dengan record di localStorage (perilaku lama).
+// Mengembalikan false secara aman bila: belum ada record/env, storage/crypto tidak
+// tersedia, atau password salah.
 export async function verifyAdminPassword(password: string): Promise<boolean> {
+  const envAuth = getEnvAuth();
+  if (envAuth !== null) {
+    try {
+      const hash = await hashPassword(envAuth.salt, password);
+      return constantTimeEqual(hash, envAuth.hash);
+    } catch {
+      // Web Crypto tidak tersedia -> gagal aman.
+      return false;
+    }
+  }
   const record = readAuthRecord();
   if (record === null) {
     return false;
@@ -237,10 +334,16 @@ export async function verifyAdminPassword(password: string): Promise<boolean> {
 
 // Ganti password admin: verifikasi password lama dulu. Bila cocok, set password baru
 // dan return true. Bila tidak cocok, tidak mengubah apa pun dan return false.
+//
+// MODE ENV: return false (no-op). Password dikelola via env var + redeploy, tidak bisa
+// diubah dari UI. UI juga menyembunyikan panel ganti password saat mode ENV.
 export async function changeAdminPassword(
   oldPassword: string,
   newPassword: string,
 ): Promise<boolean> {
+  if (isEnvAuthMode()) {
+    return false;
+  }
   const ok = await verifyAdminPassword(oldPassword);
   if (!ok) {
     return false;
@@ -252,7 +355,13 @@ export async function changeAdminPassword(
 // Hapus record auth (reset darurat untuk kasus lupa password).
 // Tanpa backend tidak ada mekanisme recovery lain. Config TIDAK tersentuh karena
 // disimpan pada key berbeda. No-op bila storage tidak tersedia.
+//
+// MODE ENV: no-op. Reset tidak berlaku karena password dikelola via env var + redeploy;
+// menghapus localStorage tidak berpengaruh pada sumber kebenaran (env).
 export function clearAdminPassword(): void {
+  if (isEnvAuthMode()) {
+    return;
+  }
   if (!isStorageAvailable()) {
     return;
   }

@@ -23,7 +23,7 @@ type Feedback =
   | { status: "error"; message: string };
 
 export function ChangePasswordPanel() {
-  const { role, changeAdminPassword } = useAuth();
+  const { role, envAuthMode, changeAdminPassword } = useAuth();
 
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -34,6 +34,24 @@ export function ChangePasswordPanel() {
   // Panel ini hanya relevan untuk admin. Jangan tampilkan apa pun ke General User.
   if (role !== "admin") {
     return null;
+  }
+
+  // MODE ENV: password dikelola global via env var Vercel + redeploy, tidak bisa diubah
+  // dari UI. Tampilkan pesan info alih-alih form ganti password.
+  if (envAuthMode) {
+    return (
+      <section className="mx-auto mt-6 w-full max-w-4xl">
+        <div className="rounded-lg border border-ink/20 bg-white/70 p-4">
+          <h3 className="text-lg font-bold text-ink">Ganti Password Admin</h3>
+          <p className="mt-1 text-sm text-ink/70">
+            Password admin dikelola lewat environment (variabel{" "}
+            <code className="rounded bg-ink/5 px-1">NEXT_PUBLIC_ADMIN_AUTH</code> di
+            Vercel) dan tidak dapat diubah dari sini. Untuk menggantinya, perbarui env var
+            tersebut lalu redeploy aplikasi.
+          </p>
+        </div>
+      </section>
+    );
   }
 
   async function handleSubmit(e: React.FormEvent) {

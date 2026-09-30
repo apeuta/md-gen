@@ -27,7 +27,18 @@ const btnBase =
 const btnPrimary = `${btnBase} bg-ink text-cream hover:bg-ink/90`;
 
 export function AdminGate() {
-  const { isAdminConfigured } = useAuth();
+  const { isAdminConfigured, envAuthMode } = useAuth();
+
+  // MODE ENV: password admin dikelola global via env var Vercel. SELALU tampilkan
+  // LoginForm (tidak pernah form buat-password), dan sembunyikan opsi reset.
+  // MODE LOCAL: perilaku lama (first-run buat-password vs login + reset).
+  if (envAuthMode) {
+    return (
+      <section className="mx-auto w-full max-w-md">
+        <LoginForm envAuthMode />
+      </section>
+    );
+  }
 
   return (
     <section className="mx-auto w-full max-w-md">
@@ -131,7 +142,7 @@ function CreatePasswordForm() {
 // Sudah dikonfigurasi: login admin
 // ============================================================================
 
-function LoginForm() {
+function LoginForm({ envAuthMode = false }: { envAuthMode?: boolean }) {
   const { loginAdmin, resetAdminPassword } = useAuth();
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -199,15 +210,23 @@ function LoginForm() {
         {busy ? "Memeriksa…" : "Masuk"}
       </button>
 
-      <div className="mt-3 text-center">
-        <button
-          type="button"
-          onClick={handleReset}
-          className="text-xs text-ink/60 underline hover:text-ink"
-        >
-          Lupa password? Reset
-        </button>
-      </div>
+      {envAuthMode ? (
+        // MODE ENV: password dikelola administrator lewat environment (Vercel).
+        // Tidak ada opsi reset dari UI — ganti password dilakukan lewat env var + redeploy.
+        <p className="mt-3 text-center text-xs text-ink/60">
+          Password admin dikelola oleh administrator (environment).
+        </p>
+      ) : (
+        <div className="mt-3 text-center">
+          <button
+            type="button"
+            onClick={handleReset}
+            className="text-xs text-ink/60 underline hover:text-ink"
+          >
+            Lupa password? Reset
+          </button>
+        </div>
+      )}
     </form>
   );
 }
