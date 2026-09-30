@@ -49,11 +49,17 @@ npm run build
 npm run start
 ```
 
-**Menjalankan test** (Vitest — 26 test untuk calculation engine, validasi, dan persistence):
+**Menjalankan test** (Vitest — 31 test untuk calculation engine, validasi, dan persistence):
 
 ```bash
 npm test
 ```
+
+> Catatan: bila `npm test` menggantung karena lokasi folder (misalnya berada di dalam OneDrive/iCloud dengan spasi pada path), gunakan alternatif berikut yang lebih andal:
+>
+> ```bash
+> npx vitest run --pool=forks --no-isolate
+> ```
 
 **Lint / type-check** (TypeScript, tanpa emit):
 
