@@ -13,8 +13,23 @@ Aplikasi ini adalah MVP untuk pilot: berjalan **sepenuhnya di browser (client-si
 - Atur rate per level di langkah Hasil untuk melihat estimasi biaya. Rate di langkah Hasil bersifat **override sementara (ephemeral)** atas rate default: SA bisa menimpa rate untuk sesi estimasi saat ini tanpa mengubah rate default, dan tombol **"Reset ke rate default"** mengembalikan ke nilai default. Rate efektif = override sesi bila ada, selain itu rate default konfigurasi, selain itu 0.
 - Export hasil sebagai **CSV** di langkah Hasil lewat tombol **"Export CSV"** di bar navigasi (tombol ini menggantikan tombol "Lanjut" di sisi kanan). Format berupa matriks task × level: baris kategori diberi huruf (A, B, C...), task diberi nomor per kategori (A.1, A.2...), mandays tiap role tersebar ke kolom level yang sesuai (satu task multi-role bisa mengisi beberapa kolom), dan baris terakhir "Grand Total" berisi total per level. Tombol nonaktif bila belum ada task terpilih. Export JSON konfigurasi tetap tersedia (di Mode Konfigurasi) untuk custom variable & re-import.
 
+**Peran: General User vs Admin**
+Aplikasi membedakan dua peran lewat sebuah **gerbang UI (gate) client-side**:
+- **General User** (default, tanpa login): hanya bisa mengakses mode **Estimasi**. Tab **Konfigurasi** tetap terlihat (dengan ikon gembok 🔒), tetapi membukanya memunculkan gerbang login/buat-password, bukan editor konfigurasi.
+- **Admin** (setelah login): akses penuh ke Estimasi + Konfigurasi.
+
+Header menampilkan indikator peran ("Mode: General User" / "Mode: Admin") dan tombol **Logout** saat menjadi admin. Sesi admin bersifat **ephemeral** — hilang saat halaman di-reload (harus login lagi).
+
+Alur autentikasi:
+- **First-run (belum ada password):** membuka Konfigurasi menampilkan form **"Buat Password Admin"** (password + konfirmasi). Setelah dibuat, langsung masuk sebagai admin. Tidak ada password default yang di-hardcode.
+- **Login:** bila password sudah dibuat, membuka Konfigurasi menampilkan form **"Login Admin"**. Password salah menampilkan pesan "Password salah".
+- **Ganti password:** tersedia di dalam Konfigurasi (panel di Import/Export), meminta password lama + baru + konfirmasi. Hanya terlihat saat sudah admin.
+- **Reset (lupa password):** link "Lupa password? Reset" pada form login menghapus record auth setelah konfirmasi, sehingga Anda bisa membuat password baru. **Konfigurasi TIDAK terhapus** karena disimpan pada key `localStorage` yang berbeda.
+
+> **Batasan keamanan (PENTING).** Ini adalah **gerbang UI praktis untuk pilot, bukan keamanan sungguhan**. Karena aplikasi sepenuhnya client-side, siapa pun yang teknis bisa membuka `localStorage`/DevTools dan melihat record auth atau melewati gate. Password **tidak pernah** disimpan plaintext: yang disimpan hanya **salt acak + hash SHA-256(salt + password)** (Web Crypto) pada key terpisah `mandays-generator:admin-auth`. Record ini **tidak ikut Export JSON** konfigurasi. Untuk keamanan sebenarnya, dibutuhkan autentikasi berbasis backend — di luar cakupan pilot ini.
+
 **Mode Konfigurasi**
-Mode ini terbagi menjadi empat sub-tab: **Task**, **Kuisioner**, **Rate**, dan **Import/Export**.
+Mode ini terbagi menjadi empat sub-tab: **Task**, **Kuisioner**, **Rate**, dan **Import/Export**. Hanya bisa diakses setelah login sebagai admin.
 - **Task:** CRUD kategori, task, variabel task, dan tier (dengan validasi tolak-simpan bila data tidak valid). Tambah beberapa role per task — tiap role punya level, baseline mandays, dan tier sendiri. Ubah urutan task dalam sebuah kategori lewat tombol geser atas/bawah (↑/↓).
 - **Kuisioner:** buat/edit pertanyaan dan petakan ke variabel/tier task. Urutan pertanyaan bisa diubah lewat tombol geser atas/bawah (↑/↓), mirip reorder task.
 - **Rate:** atur **rate default** per level staff. Nilai ini **dipersist** (tersimpan di `localStorage`) dan menjadi dasar perhitungan biaya di langkah Hasil, kecuali ditimpa oleh override sesi.
@@ -94,8 +109,8 @@ vercel --prod   # deploy production
 mandays-generator/
 ├── app/          # App Router: layout & halaman utama (app shell + navigasi mode)
 ├── components/   # Komponen UI (TaskSelector, Questionnaire, ResultsTable, RatePanel, ConfigEditor, dll.)
-├── context/      # ConfigContext — state Config (persisted) & Session (ephemeral)
-└── lib/          # Logika inti: types, calc (engine), validation, persistence, seed
+├── context/      # ConfigContext — state Config (persisted), Session & Auth (ephemeral)
+└── lib/          # Logika inti: types, calc (engine), validation, persistence, auth, seed
 ```
 
 Penjelasan arsitektur lebih lengkap ada di [architecture.md](./architecture.md).
@@ -116,4 +131,10 @@ Penjelasan arsitektur lebih lengkap ada di [architecture.md](./architecture.md).
 - [ ] Geser urutan sebuah task naik/turun dalam kategori dan pastikan urutannya berubah.
 - [ ] Di sub-tab Kuisioner, geser urutan sebuah pertanyaan naik/turun dan pastikan urutannya berubah.
 - [ ] Uji Export JSON, Import JSON, dan Reset ke seed.
+- [ ] Sebagai General User, buka tab **Konfigurasi 🔒** dan pastikan muncul gerbang (buat password/login), bukan editor.
+- [ ] First-run: buat password admin, pastikan langsung masuk sebagai admin dan header menampilkan "Mode: Admin".
+- [ ] Logout lalu login lagi dengan password yang benar (dan uji pesan "Password salah" dengan password keliru).
+- [ ] Ganti password admin (panel di Import/Export), lalu login ulang dengan password baru.
+- [ ] Uji "Lupa password? Reset" dan pastikan konfigurasi tetap utuh setelah reset.
+- [ ] Export JSON sebagai admin dan konfirmasi record auth (password) TIDAK ikut dalam file.
 - [ ] Konfirmasi tidak ada credential yang di-hardcode dan aplikasi tidak butuh environment variable.

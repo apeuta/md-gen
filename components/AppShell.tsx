@@ -21,6 +21,8 @@ import { ResultsTable } from "./ResultsTable";
 import { RatePanel } from "./RatePanel";
 import { ConfigEditor, type ConfigSubTab } from "./ConfigEditor";
 import { ExportCsvButton } from "./ExportCsvButton";
+import { AdminGate } from "./AdminGate";
+import { useAuth } from "../context/ConfigContext";
 
 // ============================================================================
 // Tipe & konstanta navigasi
@@ -59,17 +61,45 @@ export function AppShell() {
   // Sub-tab aktif pada mode Konfigurasi. Default "task".
   const [configSubTab, setConfigSubTab] = useState<ConfigSubTab>("task");
 
+  // Peran & aksi auth (gate UI client-side, ephemeral).
+  const { role, logoutAdmin } = useAuth();
+  const isAdmin = role === "admin";
+
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6">
       {/* Header aplikasi */}
-      <header>
-        <h1 className="text-2xl font-bold tracking-tight text-ink sm:text-3xl">
-          Mandays Generator
-        </h1>
-        <p className="mt-1 text-sm text-ink/70">
-          Susun estimasi mandays project: pilih task, jawab kuisioner, lihat hasil,
-          lalu atur rate. Konfigurasi dapat diedit dan di-import/export.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-ink sm:text-3xl">
+            Mandays Generator
+          </h1>
+          <p className="mt-1 text-sm text-ink/70">
+            Susun estimasi mandays project: pilih task, jawab kuisioner, lihat hasil,
+            lalu atur rate. Konfigurasi dapat diedit dan di-import/export.
+          </p>
+        </div>
+
+        {/* Indikator peran + tombol Logout (saat admin). */}
+        <div className="flex items-center gap-2">
+          <span
+            className={`rounded-full border px-3 py-1 text-xs font-medium ${
+              isAdmin
+                ? "border-ink/30 bg-ink text-cream"
+                : "border-ink/20 bg-white/70 text-ink/70"
+            }`}
+          >
+            {isAdmin ? "Mode: Admin" : "Mode: General User"}
+          </span>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={logoutAdmin}
+              className="rounded-md border border-ink/20 px-3 py-1 text-xs font-medium text-ink transition-colors hover:bg-cream focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/40"
+            >
+              Logout
+            </button>
+          )}
+        </div>
       </header>
 
       {/* Navigasi mode (tab). role="tablist" untuk aksesibilitas. */}
@@ -85,7 +115,7 @@ export function AppShell() {
           onClick={() => setMode("estimasi")}
         />
         <ModeTab
-          label="Konfigurasi"
+          label={isAdmin ? "Konfigurasi" : "Konfigurasi 🔒"}
           active={mode === "konfigurasi"}
           controls="panel-konfigurasi"
           onClick={() => setMode("konfigurasi")}
@@ -127,33 +157,41 @@ export function AppShell() {
           aria-label="Mode Konfigurasi"
           className="flex flex-col gap-6"
         >
-          {/* Navigasi sub-tab konfigurasi (Task / Kuisioner / Import-Export). */}
-          <div
-            role="tablist"
-            aria-label="Sub-menu konfigurasi"
-            className="flex gap-2 border-b border-ink/15"
-          >
-            {CONFIG_SUB_TABS.map((tab) => (
-              <SubTab
-                key={tab.value}
-                label={tab.label}
-                active={configSubTab === tab.value}
-                controls={`subpanel-${tab.value}`}
-                onClick={() => setConfigSubTab(tab.value)}
-              />
-            ))}
-          </div>
+          {/* Bila bukan admin: tampilkan gate (buat password first-run / login).
+              Bila admin: tampilkan editor konfigurasi penuh. */}
+          {!isAdmin ? (
+            <AdminGate />
+          ) : (
+            <>
+              {/* Navigasi sub-tab konfigurasi (Task / Kuisioner / Import-Export). */}
+              <div
+                role="tablist"
+                aria-label="Sub-menu konfigurasi"
+                className="flex gap-2 border-b border-ink/15"
+              >
+                {CONFIG_SUB_TABS.map((tab) => (
+                  <SubTab
+                    key={tab.value}
+                    label={tab.label}
+                    active={configSubTab === tab.value}
+                    controls={`subpanel-${tab.value}`}
+                    onClick={() => setConfigSubTab(tab.value)}
+                  />
+                ))}
+              </div>
 
-          {/* Panel sub-tab aktif. ConfigEditor merender bagian sesuai activeSubTab
-              (Task/Kuisioner memakai draft & tombol Simpan; Import/Export memakai
-              context sendiri). */}
-          <div
-            id={`subpanel-${configSubTab}`}
-            role="tabpanel"
-            aria-label={`Konfigurasi ${configSubTab}`}
-          >
-            <ConfigEditor activeSubTab={configSubTab} />
-          </div>
+              {/* Panel sub-tab aktif. ConfigEditor merender bagian sesuai activeSubTab
+                  (Task/Kuisioner memakai draft & tombol Simpan; Import/Export memakai
+                  context sendiri). */}
+              <div
+                id={`subpanel-${configSubTab}`}
+                role="tabpanel"
+                aria-label={`Konfigurasi ${configSubTab}`}
+              >
+                <ConfigEditor activeSubTab={configSubTab} />
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

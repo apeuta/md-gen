@@ -30,12 +30,13 @@ graph TD
 ## Komponen Utama
 
 - **UI Components (`app/`, `components/`)**
-  Lapisan tampilan berbasis React + Tailwind. Dua area besar: mode **Estimasi** (stepper: Pilih Task → Kuisioner → Hasil) dan mode **Konfigurasi** yang terbagi menjadi empat sub-tab: **Task**, **Kuisioner**, **Rate** (mengatur rate default persisted), dan **Import/Export**. Komponen kunci: `TaskSelector`, `Questionnaire`, `ResultsTable` (menampilkan kolom **biaya per role** = mandays role × rate efektif), `ExportCsvButton` (berada di **bar navigasi** langkah Hasil, menggantikan tombol "Lanjut"), `RatePanel` (dipakai di sub-tab Rate untuk default dan di langkah Hasil untuk override sesi + tombol "Reset ke rate default"), `ConfigEditor`, `QuestionEditor` (mendukung reorder pertanyaan ↑/↓), `ImportExportPanel`.
+  Lapisan tampilan berbasis React + Tailwind. Dua area besar: mode **Estimasi** (stepper: Pilih Task → Kuisioner → Hasil) dan mode **Konfigurasi** yang terbagi menjadi empat sub-tab: **Task**, **Kuisioner**, **Rate** (mengatur rate default persisted), dan **Import/Export**. Komponen kunci: `TaskSelector`, `Questionnaire`, `ResultsTable` (menampilkan kolom **biaya per role** = mandays role × rate efektif), `ExportCsvButton` (berada di **bar navigasi** langkah Hasil, menggantikan tombol "Lanjut"), `RatePanel` (dipakai di sub-tab Rate untuk default dan di langkah Hasil untuk override sesi + tombol "Reset ke rate default"), `ConfigEditor`, `QuestionEditor` (mendukung reorder pertanyaan ↑/↓), `ImportExportPanel`. Untuk gerbang peran: `AdminGate` (form buat-password first-run / login yang dirender `AppShell` menggantikan `ConfigEditor` saat bukan admin) dan `ChangePasswordPanel` (ganti password, hanya tampil untuk admin, disisipkan di `ImportExportPanel`). `AppShell` juga menampilkan indikator peran & tombol Logout di header.
 
 - **Config & Session State (`context/ConfigContext.tsx`)**
   Menyediakan state global via React Context, dengan pemisahan penting:
   - **Config (persisted):** definisi kategori, task, variabel, tier, pertanyaan kuisioner, dan `config.rates` (rate **default** persisted). Ini adalah aktivitas "admin" dan dipersist ke `localStorage`.
   - **Session (ephemeral):** `selectedTaskIds` (task yang dipilih), `answers` (jawaban kuisioner), dan `rateOverrides` (override rate untuk sesi estimasi saat ini). Ini adalah aktivitas "estimasi" dan hidup di memori — `rateOverrides` tidak dipersist dan dapat dikosongkan lewat "Reset ke rate default".
+  - **Auth (ephemeral):** `role` (`"user"` | `"admin"`, default `"user"`) dan `isAdminConfigured`. Peran adalah gerbang UI client-side dan **tidak dipersist** — reload selalu kembali ke General User. Fungsi `loginAdmin`, `logoutAdmin`, `createAdminPassword`, `changeAdminPassword`, dan `resetAdminPassword` diekspos lewat hook `useAuth`, yang mendelegasikan operasi hashing/storage ke `lib/auth.ts`. `isAdminConfigured` awalnya `false` (agar render server & client pertama identik) lalu dibaca dari `localStorage` setelah mount, mirip pola `loadConfig`.
 
 - **Calculation Engine (`lib/calc.ts`)**
   Kumpulan fungsi murni (tanpa efek samping) yang menghitung hasil dari `config` + `selectedTaskIds` + `answers` + `rateOverrides`. Menghasilkan mandays per task, agregasi per kategori-per-level, total per level, grand total, serta biaya. Biaya dihitung memakai **rate efektif** per level = `rateOverrides ?? config.rates ?? 0` (override sesi bila ada, selain itu rate default konfigurasi, selain itu 0). Karena murni, engine ini mudah diuji dan reaktif.
@@ -80,6 +81,15 @@ Satu pertanyaan (level kategori) bisa direferensikan beberapa task, sehingga sat
 - **Perhitungan deterministik.** Engine berupa fungsi murni agar hasil konsisten dan mudah diuji.
 - **State minimal.** Cukup React Context + hooks; tidak memakai library state eksternal.
 
-## Keamanan & Kredensial
+- **Auth Layer (`lib/auth.ts`)**
+  Modul fungsi murni + akses `localStorage` yang di-guard (mengikuti pola `persistence.ts`) untuk gerbang admin. Menyimpan record auth pada key **terpisah** `mandays-generator:admin-auth` dengan bentuk `{ version, salt, hash, algo: "SHA-256" }`. Password **tidak pernah** disimpan plaintext — yang disimpan hanya salt acak (`crypto.getRandomValues`) + `hash = SHA-256(salt + password)` via Web Crypto (`crypto.subtle`). Fungsi: `isAdminConfigured`, `setAdminPassword`, `verifyAdminPassword` (perbandingan constant-time sederhana), `changeAdminPassword`, dan `clearAdminPassword`. Semua akses `window`/`crypto` di-guard agar aman saat SSR/Node; bila Web Crypto tidak tersedia, fungsi async gagal dengan aman.
 
-Aplikasi ini **tidak memiliki kredensial apa pun**: tidak ada backend, database, API key, maupun autentikasi. Karena itu tidak ada — dan tidak boleh ada — credential yang di-hardcode di kode maupun dokumentasi. Deploy ke Vercel juga **tidak memerlukan environment variable**. Seluruh data pengguna tersimpan lokal di browser masing-masing (`localStorage`) dan tidak dikirim ke server mana pun.
+## Peran & Keamanan (gate client-side)
+
+Aplikasi membedakan **General User** (default) dan **Admin** melalui gerbang UI. General User hanya mengakses Estimasi; mode Konfigurasi memerlukan login admin. Alur first-run memaksa admin membuat password sendiri (tidak ada password default hardcoded), dengan opsi ganti password dan reset darurat (lupa password) yang **tidak menghapus konfigurasi** (key `localStorage` berbeda).
+
+> **Batasan penting.** Ini adalah **gerbang UI praktis untuk pilot, bukan keamanan sungguhan**. Aplikasi sepenuhnya client-side, sehingga siapa pun yang teknis dapat membuka `localStorage`/DevTools dan melihat record auth (salt + hash) atau melewati gate dengan memanipulasi state. Yang disimpan hanyalah **salt + hash SHA-256**, bukan password plaintext, dan record ini **tidak ikut Export JSON** konfigurasi. Untuk keamanan sebenarnya (mencegah penyerang, bukan sekadar akses tak sengaja) diperlukan autentikasi berbasis backend — di luar cakupan pilot ini.
+
+## Kredensial
+
+Tidak ada credential yang di-hardcode di kode maupun dokumentasi, dan tidak ada password default: password admin sepenuhnya dibuat pengguna saat first-run. Deploy ke Vercel juga **tidak memerlukan environment variable**. Seluruh data pengguna (termasuk record auth) tersimpan lokal di browser masing-masing (`localStorage`) dan tidak dikirim ke server mana pun.

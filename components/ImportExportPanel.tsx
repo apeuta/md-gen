@@ -13,6 +13,7 @@
 import { useRef, useState } from "react";
 
 import { useConfig } from "../context/ConfigContext";
+import { ChangePasswordPanel } from "./ChangePasswordPanel";
 
 // ============================================================================
 // Tipe status feedback
@@ -174,7 +175,11 @@ export function ImportExportPanel() {
       <p className="mt-3 text-xs text-ink/60">
         Catatan: berkas import harus berupa JSON konfigurasi yang valid. Berkas yang
         tidak sesuai skema akan ditolak tanpa mengubah konfigurasi yang sedang aktif.
+        Password admin TIDAK ikut dalam Export JSON (disimpan terpisah).
       </p>
+
+      {/* Ganti password admin — hanya tampil saat sudah login sebagai admin. */}
+      <ChangePasswordPanel />
     </section>
   );
 }

@@ -35,6 +35,17 @@ import {
   saveConfig,
   type ImportResult,
 } from "../lib/persistence";
+import {
+  changeAdminPassword as changeAdminPasswordAuth,
+  clearAdminPassword as clearAdminPasswordAuth,
+  isAdminConfigured as isAdminConfiguredAuth,
+  setAdminPassword as setAdminPasswordAuth,
+  verifyAdminPassword as verifyAdminPasswordAuth,
+} from "../lib/auth";
+
+// Peran pengguna pada sesi berjalan. "user" = General User (default, tanpa login),
+// "admin" = sudah login sebagai admin. Ephemeral: hilang saat reload.
+export type Role = "user" | "admin";
 
 // ============================================================================
 // Konstanta
@@ -95,6 +106,26 @@ export interface AppContextValue {
   setRateOverride: (level: StaffLevel, value: number | undefined) => void;
   // Menghapus SELURUH override rate sesi (kembali ke rate default config).
   clearRateOverrides: () => void;
+
+  // --- Auth / peran (ephemeral, GATE UI client-side saja) ---
+  // Peran aktif sesi. Default "user"; menjadi "admin" setelah login berhasil.
+  role: Role;
+  // Apakah password admin sudah pernah dibuat (dibaca dari localStorage saat mount
+  // & di-refresh setiap set/ganti/clear). Awal false di server untuk hindari mismatch.
+  isAdminConfigured: boolean;
+  // Login admin: verifikasi password; bila cocok set role "admin" & return true.
+  loginAdmin: (password: string) => Promise<boolean>;
+  // Logout admin: kembalikan role ke "user".
+  logoutAdmin: () => void;
+  // First-run: buat password admin lalu langsung login sebagai admin.
+  createAdminPassword: (password: string) => Promise<void>;
+  // Ganti password admin: verifikasi old dulu; return true bila sukses.
+  changeAdminPassword: (
+    oldPassword: string,
+    newPassword: string,
+  ) => Promise<boolean>;
+  // Reset darurat: hapus record auth (lupa password) & logout. Config TIDAK terhapus.
+  resetAdminPassword: () => void;
 }
 
 // Context internal; diakses melalui hook useAppContext/useConfig/useSession.
@@ -125,6 +156,13 @@ export function ConfigProvider({ children }: ConfigProviderProps) {
   // Penanda apakah config sudah dimuat dari localStorage.
   const [hydrated, setHydrated] = useState(false);
 
+  // --- Auth (ephemeral) ---
+  // Peran sesi: default "user". Selalu "user" saat reload (sesi admin tidak dipersist).
+  const [role, setRole] = useState<Role>("user");
+  // Apakah password admin sudah dikonfigurasi. Awal false agar render server & client
+  // pertama identik; dibaca dari localStorage setelah mount (mirip pola loadConfig).
+  const [isAdminConfigured, setIsAdminConfigured] = useState(false);
+
   // Ref timer untuk debounce auto-save.
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -134,6 +172,9 @@ export function ConfigProvider({ children }: ConfigProviderProps) {
     const loaded = loadConfig();
     setConfigState(loaded);
     setHydrated(true);
+    // Baca status konfigurasi admin dari localStorage setelah mount untuk hindari
+    // hydration mismatch (di server nilainya selalu false).
+    setIsAdminConfigured(isAdminConfiguredAuth());
     // Sengaja hanya dijalankan sekali saat mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -290,6 +331,54 @@ export function ConfigProvider({ children }: ConfigProviderProps) {
   }, []);
 
   // ==========================================================================
+  // Auth / peran (gate UI client-side, ephemeral)
+  // ==========================================================================
+
+  // Login admin: verifikasi password terhadap record tersimpan. Bila cocok, naikkan
+  // peran ke "admin". Return true/false agar UI bisa menampilkan pesan error.
+  const loginAdmin = useCallback(async (password: string): Promise<boolean> => {
+    const ok = await verifyAdminPasswordAuth(password);
+    if (ok) {
+      setRole("admin");
+    }
+    return ok;
+  }, []);
+
+  // Logout admin: kembalikan peran ke "user".
+  const logoutAdmin = useCallback(() => {
+    setRole("user");
+  }, []);
+
+  // First-run: buat password admin lalu langsung masuk sebagai admin.
+  // Perbarui isAdminConfigured setelah record dibuat.
+  const createAdminPassword = useCallback(
+    async (password: string): Promise<void> => {
+      await setAdminPasswordAuth(password);
+      setIsAdminConfigured(isAdminConfiguredAuth());
+      setRole("admin");
+    },
+    [],
+  );
+
+  // Ganti password admin: verifikasi old dulu. Return true bila berhasil.
+  const changeAdminPassword = useCallback(
+    async (oldPassword: string, newPassword: string): Promise<boolean> => {
+      const ok = await changeAdminPasswordAuth(oldPassword, newPassword);
+      // Refresh status (tetap true bila sukses; berguna bila record sempat berubah).
+      setIsAdminConfigured(isAdminConfiguredAuth());
+      return ok;
+    },
+    [],
+  );
+
+  // Reset darurat: hapus record auth & logout. Config TIDAK terhapus (key berbeda).
+  const resetAdminPassword = useCallback(() => {
+    clearAdminPasswordAuth();
+    setIsAdminConfigured(isAdminConfiguredAuth());
+    setRole("user");
+  }, []);
+
+  // ==========================================================================
   // Nilai context (memoized)
   // ==========================================================================
 
@@ -313,6 +402,13 @@ export function ConfigProvider({ children }: ConfigProviderProps) {
       clearAnswer,
       setRateOverride,
       clearRateOverrides,
+      role,
+      isAdminConfigured,
+      loginAdmin,
+      logoutAdmin,
+      createAdminPassword,
+      changeAdminPassword,
+      resetAdminPassword,
     }),
     [
       config,
@@ -333,6 +429,13 @@ export function ConfigProvider({ children }: ConfigProviderProps) {
       clearAnswer,
       setRateOverride,
       clearRateOverrides,
+      role,
+      isAdminConfigured,
+      loginAdmin,
+      logoutAdmin,
+      createAdminPassword,
+      changeAdminPassword,
+      resetAdminPassword,
     ],
   );
 
@@ -402,5 +505,27 @@ export function useSession() {
     clearAnswer,
     setRateOverride,
     clearRateOverrides,
+  };
+}
+
+// Hook fokus Auth (peran & gate admin, ephemeral). GATE UI client-side saja.
+export function useAuth() {
+  const {
+    role,
+    isAdminConfigured,
+    loginAdmin,
+    logoutAdmin,
+    createAdminPassword,
+    changeAdminPassword,
+    resetAdminPassword,
+  } = useAppContext();
+  return {
+    role,
+    isAdminConfigured,
+    loginAdmin,
+    logoutAdmin,
+    createAdminPassword,
+    changeAdminPassword,
+    resetAdminPassword,
   };
 }
