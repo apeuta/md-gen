@@ -44,7 +44,7 @@ graph TD
   Menangani load/save `localStorage`, Export JSON (unduh), Import JSON (dengan validasi skema), dan Reset ke seed. Import yang tidak valid ditolak tanpa merusak state aktif. Bila `localStorage` tidak tersedia (mode privat), aplikasi tetap jalan dengan state memori.
 
 - **Seed Data (`lib/seed.ts`)**
-  Data awal berisi 7 kategori dan 71 task hasil ekstraksi dari referensi RACI DMS, lengkap dengan `baselineMandays` dan `defaultLevel` default. Dipakai saat `localStorage` kosong atau saat pengguna melakukan Reset. Seluruh nilai dapat diubah pengguna tanpa mengubah kode.
+  Data awal berisi 7 kategori dan 71 task hasil ekstraksi dari referensi RACI DMS; tiap task berisi satu atau lebih role dengan `baselineMandays` dan `level` masing-masing. Dipakai saat `localStorage` kosong atau saat pengguna melakukan Reset. Seluruh nilai dapat diubah pengguna tanpa mengubah kode.
 
 ## Alur Data Utama
 
@@ -59,13 +59,16 @@ graph TD
 Konfigurasi disusun sebagai `AppConfig` yang menjadi bentuk file export/import:
 
 - `Category` → berisi banyak `Task`.
-- `Task` → punya `baselineMandays`, `defaultLevel`, dan opsional `variable`.
+- `Task` → punya daftar `roles` (minimal 1 role).
+- `TaskRole` → punya `level`, `baselineMandays`, dan opsional `variable` (tier sendiri per role). Satu task bisa melibatkan beberapa role sekaligus; mandays dijumlahkan lintas role.
 - `TaskVariable` → mengacu ke sebuah `Question` dan punya daftar `Tier`.
-- `Tier` → menentukan `mandays` dan opsional `levelShift` (menggeser level staff task).
+- `Tier` → menentukan `mandays` dan opsional `levelShift` (menggeser level role tersebut, bukan level task).
 - `Question` → pertanyaan kuisioner di level kategori (`numeric` atau `single_choice`).
 - `RateTable` → rate opsional per level staff untuk estimasi biaya.
 
 Satu pertanyaan (level kategori) bisa direferensikan beberapa task, sehingga satu jawaban dapat memengaruhi banyak task sekaligus.
+
+> **Versi skema config = 2.** Ini adalah *breaking change* (model role per task menggantikan model lama 1 task = 1 level). Config lama (versi < 2) tidak kompatibel; saat terdeteksi, aplikasi fallback ke seed data.
 
 ## Keputusan Arsitektur Utama (selaras prinsip MVP)
 
