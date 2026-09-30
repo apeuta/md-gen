@@ -30,7 +30,7 @@ graph TD
 ## Komponen Utama
 
 - **UI Components (`app/`, `components/`)**
-  Lapisan tampilan berbasis React + Tailwind. Dua area besar: mode **Estimasi** (stepper: Pilih Task → Kuisioner → Hasil) dan mode **Konfigurasi** (editor task/kuisioner + import/export). Komponen kunci: `TaskSelector`, `Questionnaire`, `ResultsTable`, `RatePanel`, `ConfigEditor`, `ImportExportPanel`.
+  Lapisan tampilan berbasis React + Tailwind. Dua area besar: mode **Estimasi** (stepper: Pilih Task → Kuisioner → Hasil) dan mode **Konfigurasi** yang terbagi menjadi tiga sub-tab: **Task**, **Kuisioner**, dan **Import/Export**. Komponen kunci: `TaskSelector`, `Questionnaire`, `ResultsTable` (termasuk tombol Export CSV di langkah Hasil), `RatePanel`, `ConfigEditor`, `QuestionEditor` (mendukung reorder pertanyaan ↑/↓), `ImportExportPanel`.
 
 - **Config & Session State (`context/ConfigContext.tsx`)**
   Menyediakan state global via React Context, dengan pemisahan penting:
@@ -41,7 +41,10 @@ graph TD
   Kumpulan fungsi murni (tanpa efek samping) yang menghitung hasil dari `config` + `selectedTaskIds` + `answers`. Menghasilkan mandays per task, agregasi per kategori-per-level, total per level, grand total, serta biaya (bila rate diisi). Karena murni, engine ini mudah diuji dan reaktif.
 
 - **Persistence Layer (`lib/persistence.ts`, `lib/validation.ts`)**
-  Menangani load/save `localStorage`, Export JSON (unduh), Import JSON (dengan validasi skema), dan Reset ke seed. Import yang tidak valid ditolak tanpa merusak state aktif. Bila `localStorage` tidak tersedia (mode privat), aplikasi tetap jalan dengan state memori.
+  Menangani load/save `localStorage`, Export JSON (unduh), Import JSON (dengan validasi skema), dan Reset ke seed. Import yang tidak valid ditolak tanpa merusak state aktif. Bila `localStorage` tidak tersedia (mode privat), aplikasi tetap jalan dengan state memori. Helper `downloadText` di modul ini dipakai untuk memicu unduhan file, baik untuk JSON konfigurasi maupun CSV hasil estimasi.
+
+- **CSV Module (`lib/csv.ts`)**
+  Kumpulan fungsi murni yang membangun string CSV dari `EstimationResult` + `AppConfig`. Menghasilkan matriks task × level dengan penomoran kategori (A, B, C...) dan task per kategori (A.1, A.2...), menyebar mandays tiap role ke kolom level yang sesuai, serta menambahkan baris "Grand Total" per level. Karena murni, mudah diuji dan tidak menyentuh DOM — unduhan dilakukan lewat `downloadText`.
 
 - **Seed Data (`lib/seed.ts`)**
   Data awal berisi 7 kategori dan 71 task hasil ekstraksi dari referensi RACI DMS; tiap task berisi satu atau lebih role dengan `baselineMandays` dan `level` masing-masing. Dipakai saat `localStorage` kosong atau saat pengguna melakukan Reset. Seluruh nilai dapat diubah pengguna tanpa mengubah kode.

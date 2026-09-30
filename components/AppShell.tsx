@@ -19,8 +19,7 @@ import { TaskSelector } from "./TaskSelector";
 import { Questionnaire } from "./Questionnaire";
 import { ResultsTable } from "./ResultsTable";
 import { RatePanel } from "./RatePanel";
-import { ConfigEditor } from "./ConfigEditor";
-import { ImportExportPanel } from "./ImportExportPanel";
+import { ConfigEditor, type ConfigSubTab } from "./ConfigEditor";
 
 // ============================================================================
 // Tipe & konstanta navigasi
@@ -31,6 +30,13 @@ type Mode = "estimasi" | "konfigurasi";
 
 // Langkah pada mode Estimasi (stepper 3 langkah).
 type Step = 0 | 1 | 2;
+
+// Definisi sub-tab pada mode Konfigurasi (label + nilai).
+const CONFIG_SUB_TABS: { value: ConfigSubTab; label: string }[] = [
+  { value: "task", label: "Task" },
+  { value: "kuisioner", label: "Kuisioner" },
+  { value: "impor", label: "Import/Export" },
+];
 
 // Definisi langkah stepper untuk render label & navigasi.
 const STEPS: { label: string; description: string }[] = [
@@ -48,6 +54,8 @@ export function AppShell() {
   const [mode, setMode] = useState<Mode>("estimasi");
   // Langkah aktif pada mode Estimasi.
   const [step, setStep] = useState<Step>(0);
+  // Sub-tab aktif pada mode Konfigurasi. Default "task".
+  const [configSubTab, setConfigSubTab] = useState<ConfigSubTab>("task");
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6">
@@ -115,10 +123,35 @@ export function AppShell() {
           id="panel-konfigurasi"
           role="tabpanel"
           aria-label="Mode Konfigurasi"
-          className="flex flex-col gap-8"
+          className="flex flex-col gap-6"
         >
-          <ConfigEditor />
-          <ImportExportPanel />
+          {/* Navigasi sub-tab konfigurasi (Task / Kuisioner / Import-Export). */}
+          <div
+            role="tablist"
+            aria-label="Sub-menu konfigurasi"
+            className="flex gap-2 border-b border-ink/15"
+          >
+            {CONFIG_SUB_TABS.map((tab) => (
+              <SubTab
+                key={tab.value}
+                label={tab.label}
+                active={configSubTab === tab.value}
+                controls={`subpanel-${tab.value}`}
+                onClick={() => setConfigSubTab(tab.value)}
+              />
+            ))}
+          </div>
+
+          {/* Panel sub-tab aktif. ConfigEditor merender bagian sesuai activeSubTab
+              (Task/Kuisioner memakai draft & tombol Simpan; Import/Export memakai
+              context sendiri). */}
+          <div
+            id={`subpanel-${configSubTab}`}
+            role="tabpanel"
+            aria-label={`Konfigurasi ${configSubTab}`}
+          >
+            <ConfigEditor activeSubTab={configSubTab} />
+          </div>
         </div>
       )}
     </div>
@@ -137,6 +170,36 @@ interface ModeTabProps {
 }
 
 function ModeTab({ label, active, controls, onClick }: ModeTabProps) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      aria-controls={controls}
+      onClick={onClick}
+      className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/40 ${
+        active
+          ? "border-ink text-ink"
+          : "border-transparent text-ink/50 hover:text-ink/80"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+// ============================================================================
+// Sub-komponen: sub-tab konfigurasi (gaya konsisten dengan ModeTab)
+// ============================================================================
+
+interface SubTabProps {
+  label: string;
+  active: boolean;
+  controls: string;
+  onClick: () => void;
+}
+
+function SubTab({ label, active, controls, onClick }: SubTabProps) {
   return (
     <button
       type="button"

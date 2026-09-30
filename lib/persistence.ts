@@ -95,19 +95,20 @@ export function saveConfig(config: AppConfig): void {
 // Export
 // ============================================================================
 
-// Memicu unduhan AppConfig sebagai file .json via Blob + anchor download (Req 8.3).
+// Helper generik memicu unduhan sebuah string sebagai berkas via Blob + anchor.
 // Di-guard agar aman saat SSR / tanpa document (no-op bila tidak ada window/document).
-export function exportConfig(
-  config: AppConfig,
-  fileName: string = EXPORT_FILE_NAME,
+// Dipakai oleh export JSON maupun export CSV agar pola unduh tidak terduplikasi.
+export function downloadText(
+  content: string,
+  fileName: string,
+  mimeType: string,
 ): void {
   if (typeof window === "undefined" || typeof document === "undefined") {
     return;
   }
 
   try {
-    const json = JSON.stringify(config, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
+    const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
 
     const anchor = document.createElement("a");
@@ -120,8 +121,22 @@ export function exportConfig(
     document.body.removeChild(anchor);
     URL.revokeObjectURL(url);
   } catch {
-    // Kegagalan export tidak boleh mematahkan aplikasi.
+    // Kegagalan unduh tidak boleh mematahkan aplikasi.
   }
+}
+
+// Memicu unduhan AppConfig sebagai file .json via Blob + anchor download (Req 8.3).
+// Di-guard agar aman saat SSR / tanpa document (no-op bila tidak ada window/document).
+export function exportConfig(
+  config: AppConfig,
+  fileName: string = EXPORT_FILE_NAME,
+): void {
+  if (typeof window === "undefined" || typeof document === "undefined") {
+    return;
+  }
+
+  const json = JSON.stringify(config, null, 2);
+  downloadText(json, fileName, "application/json");
 }
 
 // ============================================================================

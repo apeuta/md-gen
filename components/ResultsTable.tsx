@@ -18,6 +18,8 @@ import { useMemo } from "react";
 
 import { useConfig, useSession } from "../context/ConfigContext";
 import { ALL_STAFF_LEVELS, calculate } from "../lib/calc";
+import { buildCsv } from "../lib/csv";
+import { downloadText } from "../lib/persistence";
 import { staffLevelLabel } from "../lib/types";
 import type { EstimationResult, StaffLevel, TaskResult } from "../lib/types";
 
@@ -92,14 +94,38 @@ export function ResultsTable() {
   // Empty state: tidak ada task terpilih (Req 5.5). Tetap tampilkan ringkasan nol.
   const isEmpty = result.perTask.length === 0;
 
+  // Export CSV: bangun string CSV dari hasil estimasi + config, lalu unduh sebagai .csv.
+  // Tombol dinonaktifkan bila belum ada task terpilih (result.perTask kosong).
+  function handleExportCsv() {
+    const csv = buildCsv(result, config);
+    downloadText(csv, "estimasi-mandays.csv", "text/csv;charset=utf-8");
+  }
+
   return (
     <section className="mx-auto w-full max-w-4xl">
-      <header className="mb-4">
-        <h2 className="text-xl font-bold text-ink">Hasil Estimasi</h2>
-        <p className="mt-1 text-sm text-ink/70">
-          Ringkasan mandays per task, per kategori, dan total per level. Dihitung
-          ulang otomatis setiap pilihan task atau jawaban berubah.
-        </p>
+      <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold text-ink">Hasil Estimasi</h2>
+          <p className="mt-1 text-sm text-ink/70">
+            Ringkasan mandays per task, per kategori, dan total per level. Dihitung
+            ulang otomatis setiap pilihan task atau jawaban berubah.
+          </p>
+        </div>
+        {/* Export CSV hasil estimasi. Dinonaktifkan bila belum ada task terpilih. */}
+        <button
+          type="button"
+          onClick={handleExportCsv}
+          disabled={isEmpty}
+          aria-disabled={isEmpty}
+          title={
+            isEmpty
+              ? "Pilih minimal satu task terlebih dahulu untuk mengekspor CSV."
+              : "Unduh hasil estimasi sebagai berkas CSV."
+          }
+          className="rounded-md border border-ink/30 bg-ink px-4 py-2 text-sm font-medium text-cream transition hover:bg-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink/40 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Export CSV
+        </button>
       </header>
 
       {isEmpty ? (

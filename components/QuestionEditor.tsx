@@ -43,6 +43,8 @@ export interface QuestionEditorProps {
     questionIdx: number,
     updater: (question: Question) => Question,
   ) => void;
+  // Menggeser urutan pertanyaan: dir -1 (ke atas) atau +1 (ke bawah).
+  onMoveQuestion: (questionIdx: number, dir: -1 | 1) => void;
 }
 
 // ============================================================================
@@ -55,6 +57,7 @@ export function QuestionEditor({
   onAddQuestion,
   onRemoveQuestion,
   onQuestionChange,
+  onMoveQuestion,
 }: QuestionEditorProps) {
   return (
     <section className="mt-8">
@@ -86,6 +89,10 @@ export function QuestionEditor({
             categories={categories}
             onRemove={() => onRemoveQuestion(qIdx)}
             onChange={(updater) => onQuestionChange(qIdx, updater)}
+            onMoveUp={() => onMoveQuestion(qIdx, -1)}
+            onMoveDown={() => onMoveQuestion(qIdx, 1)}
+            canMoveUp={qIdx > 0}
+            canMoveDown={qIdx < questions.length - 1}
           />
         ))}
       </div>
@@ -102,6 +109,10 @@ interface QuestionRowProps {
   categories: Category[];
   onRemove: () => void;
   onChange: (updater: (question: Question) => Question) => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
 }
 
 function QuestionRow({
@@ -109,6 +120,10 @@ function QuestionRow({
   categories,
   onRemove,
   onChange,
+  onMoveUp,
+  onMoveDown,
+  canMoveUp,
+  canMoveDown,
 }: QuestionRowProps) {
   // Mengubah type pertanyaan; menyesuaikan field options agar konsisten:
   // - single_choice: pastikan options terdefinisi (minimal array kosong).
@@ -208,6 +223,32 @@ function QuestionRow({
             <option value="single_choice">Pilihan tunggal</option>
             <option value="numeric">Angka</option>
           </select>
+        </div>
+
+        {/* Tombol geser urutan pertanyaan (ke atas/bawah) */}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            className={`${btnGhost} disabled:opacity-40 disabled:cursor-not-allowed`}
+            onClick={onMoveUp}
+            disabled={!canMoveUp}
+            aria-disabled={!canMoveUp}
+            aria-label="Geser pertanyaan ke atas"
+            title="Geser ke atas"
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            className={`${btnGhost} disabled:opacity-40 disabled:cursor-not-allowed`}
+            onClick={onMoveDown}
+            disabled={!canMoveDown}
+            aria-disabled={!canMoveDown}
+            aria-label="Geser pertanyaan ke bawah"
+            title="Geser ke bawah"
+          >
+            ↓
+          </button>
         </div>
 
         <button type="button" className={btnDanger} onClick={onRemove}>

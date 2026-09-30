@@ -34,6 +34,10 @@ import type {
   Tier,
 } from "../lib/types";
 import { QuestionEditor } from "./QuestionEditor";
+import { ImportExportPanel } from "./ImportExportPanel";
+
+// Sub-tab pada mode Konfigurasi. Dikendalikan oleh AppShell dan diteruskan ke ConfigEditor.
+export type ConfigSubTab = "task" | "kuisioner" | "impor";
 
 // ============================================================================
 // Utilitas id sederhana (MVP, tanpa dependensi eksternal)
@@ -110,7 +114,15 @@ const btnDanger = `${btnBase} border border-red-300 text-red-700 hover:bg-red-50
 // Komponen utama
 // ============================================================================
 
-export function ConfigEditor() {
+export interface ConfigEditorProps {
+  // Sub-tab aktif pada mode Konfigurasi. Menentukan bagian mana yang dirender:
+  // "task" -> editor kategori/task/role/tier, "kuisioner" -> QuestionEditor,
+  // "impor" -> ImportExportPanel. Draft & tombol Simpan tetap milik komponen ini
+  // sehingga tetap satu sumber kebenaran untuk perubahan Task & Kuisioner.
+  activeSubTab: ConfigSubTab;
+}
+
+export function ConfigEditor({ activeSubTab }: ConfigEditorProps) {
   const { config, setConfig } = useConfig();
 
   // Draft lokal yang diedit pengguna, diinisialisasi dari config aktif.
@@ -462,6 +474,19 @@ export function ConfigEditor() {
     }));
   }
 
+  // Menggeser posisi pertanyaan pada draft.questions: dir -1 (ke atas) atau +1 (ke bawah).
+  // No-op bila sudah di ujung array.
+  function moveQuestion(questionIdx: number, dir: -1 | 1) {
+    setDraft((prev) => {
+      const target = questionIdx + dir;
+      if (target < 0 || target >= prev.questions.length) return prev;
+      const questions = [...prev.questions];
+      const [moved] = questions.splice(questionIdx, 1);
+      questions.splice(target, 0, moved);
+      return { ...prev, questions };
+    });
+  }
+
   // Mengganti satu pertanyaan berdasarkan indeks dengan hasil fungsi updater.
   function updateQuestion(
     questionIdx: number,
@@ -505,20 +530,35 @@ export function ConfigEditor() {
   // Render
   // ==========================================================================
 
+  // Sub-tab Import/Export tidak bergantung pada draft, jadi cukup render panel-nya.
+  // Panel ini memakai context sendiri (bukan draft) sehingga tombol Simpan/indikator
+  // dirty tidak relevan di sini dan sengaja tidak ditampilkan.
+  if (activeSubTab === "impor") {
+    return <ImportExportPanel />;
+  }
+
+  // Judul & deskripsi menyesuaikan sub-tab aktif (Task atau Kuisioner).
+  const heading =
+    activeSubTab === "task" ? "Konfigurasi Task" : "Konfigurasi Kuisioner";
+  const description =
+    activeSubTab === "task"
+      ? "Kelola kategori, task, variabel, dan tier. Perubahan hanya tersimpan setelah ditekan Simpan dan lolos validasi."
+      : "Kelola pertanyaan kuisioner. Perubahan hanya tersimpan setelah ditekan Simpan dan lolos validasi.";
+
   return (
     <section className="mx-auto w-full max-w-4xl">
       <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-xl font-bold text-ink">Konfigurasi Task</h2>
-          <p className="mt-1 text-sm text-ink/70">
-            Kelola kategori, task, variabel, dan tier. Perubahan hanya tersimpan
-            setelah ditekan Simpan dan lolos validasi.
-          </p>
+          <h2 className="text-xl font-bold text-ink">{heading}</h2>
+          <p className="mt-1 text-sm text-ink/70">{description}</p>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" className={btnGhost} onClick={addCategory}>
-            + Kategori
-          </button>
+          {/* Tombol "+ Kategori" hanya relevan di sub-tab Task. */}
+          {activeSubTab === "task" && (
+            <button type="button" className={btnGhost} onClick={addCategory}>
+              + Kategori
+            </button>
+          )}
           <button
             type="button"
             className={btnGhost}
@@ -568,7 +608,20 @@ export function ConfigEditor() {
         </p>
       )}
 
-      {/* Daftar kategori */}
+      {/* Sub-tab Kuisioner: hanya tampilkan editor pertanyaan (mengedit draft.questions). */}
+      {activeSubTab === "kuisioner" && (
+        <QuestionEditor
+          questions={draft.questions}
+          categories={draft.categories}
+          onAddQuestion={addQuestion}
+          onRemoveQuestion={removeQuestion}
+          onQuestionChange={updateQuestion}
+          onMoveQuestion={moveQuestion}
+        />
+      )}
+
+      {/* Sub-tab Task: daftar kategori/task/role/tier. */}
+      {activeSubTab === "task" && (
       <div className="flex flex-col gap-4">
         {draft.categories.length === 0 && (
           <p className="rounded-md border border-dashed border-ink/20 px-4 py-6 text-center text-sm text-ink/60">
@@ -667,15 +720,7 @@ export function ConfigEditor() {
           </div>
         ))}
       </div>
-
-      {/* Editor kuisioner (Req 7.5) — mengedit draft.questions yang sama */}
-      <QuestionEditor
-        questions={draft.questions}
-        categories={draft.categories}
-        onAddQuestion={addQuestion}
-        onRemoveQuestion={removeQuestion}
-        onQuestionChange={updateQuestion}
-      />
+      )}
     </section>
   );
 }

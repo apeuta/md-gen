@@ -11,13 +11,13 @@ Aplikasi ini adalah MVP untuk pilot: berjalan **sepenuhnya di browser (client-si
 - Isi kuisioner per kategori — mendukung pertanyaan `numeric` dan `single_choice`. Kuisioner hanya menampilkan pertanyaan yang relevan dengan task terpilih.
 - Lihat hasil: rincian mandays **per role** untuk tiap task (satu task bisa melibatkan beberapa role sekaligus, masing-masing dengan level & mandays sendiri), dengan penanda *out-of-range* per role bila jawaban di luar rentang tier, subtotal per kategori, total per level, dan grand total. Perhitungan bersifat reaktif — berubah otomatis saat pilihan/jawaban berubah.
 - Atur rate per level (opsional) untuk melihat estimasi biaya per level dan grand total biaya.
+- Export hasil sebagai **CSV** di langkah Hasil lewat tombol "Export CSV". Format berupa matriks task × level: baris kategori diberi huruf (A, B, C...), task diberi nomor per kategori (A.1, A.2...), mandays tiap role tersebar ke kolom level yang sesuai (satu task multi-role bisa mengisi beberapa kolom), dan baris terakhir "Grand Total" berisi total per level. Tombol nonaktif bila belum ada task terpilih. Export JSON konfigurasi tetap tersedia (di Mode Konfigurasi) untuk custom variable & re-import.
 
 **Mode Konfigurasi**
-- CRUD kategori, task, variabel task, dan tier (dengan validasi tolak-simpan bila data tidak valid).
-- Tambah beberapa role per task — tiap role punya level, baseline mandays, dan tier sendiri.
-- Ubah urutan task dalam sebuah kategori lewat tombol geser atas/bawah (↑/↓).
-- Editor kuisioner: buat/edit pertanyaan dan petakan ke variabel/tier task.
-- Import JSON (dengan validasi), Export JSON (unduh), dan Reset ke seed data.
+Mode ini terbagi menjadi tiga sub-tab: **Task**, **Kuisioner**, dan **Import/Export**.
+- **Task:** CRUD kategori, task, variabel task, dan tier (dengan validasi tolak-simpan bila data tidak valid). Tambah beberapa role per task — tiap role punya level, baseline mandays, dan tier sendiri. Ubah urutan task dalam sebuah kategori lewat tombol geser atas/bawah (↑/↓).
+- **Kuisioner:** buat/edit pertanyaan dan petakan ke variabel/tier task. Urutan pertanyaan bisa diubah lewat tombol geser atas/bawah (↑/↓), mirip reorder task.
+- **Import/Export:** Import JSON (dengan validasi), Export JSON (unduh), dan Reset ke seed data.
 
 Seed data awal berisi 7 kategori dan 71 task hasil ekstraksi dari referensi RACI DMS. Semua nilai bisa diubah sepenuhnya oleh pengguna tanpa mengubah kode.
 
@@ -106,8 +106,11 @@ Penjelasan arsitektur lebih lengkap ada di [architecture.md](./architecture.md).
 - [ ] Isi kuisioner — uji pertanyaan `numeric` dan `single_choice`.
 - [ ] Lihat tabel hasil: rincian mandays per role di tiap task, termasuk penanda *out-of-range* per role saat jawaban di luar rentang tier.
 - [ ] Atur rate per level dan verifikasi estimasi biaya (per level + grand total) muncul.
-- [ ] Buka mode Konfigurasi, edit sebuah task/tier/pertanyaan, dan pastikan hasil ikut berubah.
+- [ ] Di langkah Hasil, tekan "Export CSV" dan periksa formatnya: penomoran kategori A/B/C, task A.1/A.2, mandays per level, dan baris Grand Total.
+- [ ] Buka mode Konfigurasi dan berpindah antar sub-tab (Task, Kuisioner, Import/Export).
+- [ ] Edit sebuah task/tier/pertanyaan, dan pastikan hasil ikut berubah.
 - [ ] Tambah role kedua pada sebuah task dan pastikan mandays kedua role muncul di hasil.
 - [ ] Geser urutan sebuah task naik/turun dalam kategori dan pastikan urutannya berubah.
+- [ ] Di sub-tab Kuisioner, geser urutan sebuah pertanyaan naik/turun dan pastikan urutannya berubah.
 - [ ] Uji Export JSON, Import JSON, dan Reset ke seed.
 - [ ] Konfirmasi tidak ada credential yang di-hardcode dan aplikasi tidak butuh environment variable.
